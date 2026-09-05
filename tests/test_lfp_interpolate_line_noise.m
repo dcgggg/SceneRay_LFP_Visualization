@@ -30,6 +30,18 @@ verifyEqual(testCase, out.psdForFitting(80), 50);
 verifyEqual(testCase, out.psdForFitting(40), 1, 'AbsTol', 1e-12);
 end
 
+function testDataWrapperRecordsProcessingHistory(testCase)
+ensure_src_on_path(testCase);
+spectrum = struct('frequencyHz', (1:100)', 'psd', ones(100, 1));
+data = struct('signal', zeros(10, 1), 'fs', 1000, 'units', "uV", ...
+    'spectrum', spectrum, 'processingHistory', struct( ...
+    'operation', "psd", 'parameters', struct(), 'notes', "fixture"));
+out = lfp_prepare_spectrum_for_fitting(data);
+verifyEqual(testCase, out.processingHistory(end).operation, "line_noise_interpolation");
+verifyTrue(testCase, isfield(out.spectrum, 'psdForFitting'));
+verifyEqual(testCase, out.spectrum.psd, spectrum.psd);
+end
+
 function ensure_src_on_path(testCase)
 projectRoot = fileparts(fileparts(mfilename('fullpath')));
 srcRoot = fullfile(projectRoot, 'src');
