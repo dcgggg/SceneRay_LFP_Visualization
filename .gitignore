@@ -15,3 +15,13 @@ codegen/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Python and portable builds
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+*.spec
