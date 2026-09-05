@@ -1,4 +1,4 @@
-# Algorithms (draft)
+# Algorithms
 
 This document records planned definitions before implementation.
 
@@ -16,7 +16,18 @@ PSD units are signal-unit-squared per Hz. Band power is the integral of the sele
 
 ## Aperiodic and periodic components
 
-The first MATLAB-native implementation will support a fixed log-log aperiodic model and report offset, exponent, residual/error, and fit quality separately from periodic peaks. Knee fitting will be designed as a separate mode. FieldTrip or native MATLAB implementations may be used, but the project will not call Python FOOOF at runtime. The 40 Hz harmonic bins remain in the PSD and are interpolated only in the spectrum supplied to the parameterization step.
+The current MATLAB-native implementation supports a fixed log-log aperiodic model and reports offset, exponent, residual/error, and fit quality separately from periodic peaks. Knee fitting is intentionally a separate future mode. FieldTrip or native MATLAB implementations may be used, but the project will not call Python FOOOF at runtime. The 40 Hz harmonic bins remain in the PSD and are interpolated only in the spectrum supplied to the parameterization step.
+
+`lfp_interpolate_line_noise` reproduces the documented `fooof.utils.interpolate_spectrum` behavior: each closed range uses averaged buffer samples on both sides and linear interpolation in log-log spacing. With the defaults, ranges are 38–42, 78–82, and so on up to Nyquist. The original `spectrum.psd` is never replaced.
+
+Implemented functions:
+
+- `lfp_preprocess`: robust amplitude, derivative/step and saturation marking; optional NaN processing copy.
+- `lfp_compute_psd`: manual Welch PSD with artifact-heavy window rejection.
+- `lfp_prepare_spectrum_for_fitting`: fitting-only line-noise interpolation with processing history.
+- `lfp_fit_spectral_parameters`: fixed offset/exponent and residual peak detection.
+- `lfp_compute_band_power`: total, relative, aperiodic and periodic-above-aperiodic integrations.
+- `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
 
 ## Testing
 
