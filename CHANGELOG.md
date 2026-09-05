@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added non-destructive robust artifact marking, manual Welch PSD, FOOOF-compatible fitting-only line-noise interpolation, fixed aperiodic/periodic parameterization, configurable band-power integration, overview plotting, and MAT/CSV/log/PNG export.
+- Added non-destructive robust artifact marking, manual Welch PSD, FOOOF-compatible fitting-only line-noise interpolation, fixed aperiodic/periodic parameterization, configurable band-power integration, artifact-aware manual STFT, overview plotting, and MAT/CSV/log/PNG export.
 
 - Initialized the MATLAB-only project structure and development rules.
 - Added a MATLAB entry-point smoke test.

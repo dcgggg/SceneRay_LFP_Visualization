@@ -35,11 +35,12 @@ data = lfp_prepare_spectrum_for_fitting(data, LineFrequencyHz=40, ...
     InterpolationHalfWidthHz=2, BufferSamples=3);
 data = lfp_fit_spectral_parameters(data, FitRangeHz=[3 150]);
 data = lfp_compute_band_power(data);
+data = lfp_compute_time_frequency(data, WindowSeconds=1, StepSeconds=0.25);
 lfp_plot_results(data);
 files = lfp_export_results(data, "results");
 ```
 
-40 Hz 及其 Nyquist 以下谐波保留在原始时域和 `spectrum.psd` 中；`lfp_prepare_spectrum_for_fitting` 仅生成 `spectrum.psdForFitting`，按照 FOOOF 的 line-noise 插值思路在 log-log 空间插值，供参数化使用。
+40 Hz 及其 Nyquist 以下谐波保留在原始时域和 `spectrum.psd` 中；`lfp_prepare_spectrum_for_fitting` 仅生成 `spectrum.psdForFitting`，按照 FOOOF 的 line-noise 插值思路在 log-log 空间插值，供参数化使用。`lfp_compute_time_frequency` 提供基础 MATLAB STFT，并对伪影过多的时间窗返回 NaN。
 
 ## 初始化测试
 

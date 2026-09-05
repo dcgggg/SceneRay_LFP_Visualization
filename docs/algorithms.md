@@ -27,6 +27,7 @@ Implemented functions:
 - `lfp_prepare_spectrum_for_fitting`: fitting-only line-noise interpolation with processing history.
 - `lfp_fit_spectral_parameters`: fixed offset/exponent and residual peak detection.
 - `lfp_compute_band_power`: total, relative, aperiodic and periodic-above-aperiodic integrations.
+- `lfp_compute_time_frequency`: artifact-aware manual STFT.
 - `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
 
 ## Testing
