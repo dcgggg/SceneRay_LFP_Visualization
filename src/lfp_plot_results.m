@@ -27,7 +27,7 @@ sampleLimit = min(nSamples, max(1, round(options.MaxPlotSeconds * data.fs)));
 
 figureHandle = figure('Visible', char(options.Visible), 'Color', 'w', ...
     'Name', 'SceneRay LFP analysis', 'NumberTitle', 'off');
-tiledlayout(3, 1, 'TileSpacing', 'compact');
+tiledlayout(4, 1, 'TileSpacing', 'compact');
 nexttile;
 plot(time(1:sampleLimit), data.signal(1:sampleLimit, channels), 'LineWidth', 0.8);
 xlabel('Time (s)'); ylabel("Signal (" + string(data.units) + ")");
@@ -75,6 +75,17 @@ if isfield(data, 'bandPower') && isfield(data.bandPower, 'table')
     title('Band power'); grid on; legend(channel_labels(data, channels), 'Interpreter', 'none', 'Location', 'best');
 else
     text(0.1, 0.5, 'Run lfp_compute_band_power to display band powers.'); axis off;
+end
+
+nexttile;
+if isfield(data, 'timeFrequency')
+    channel = channels(1);
+    imagesc(data.timeFrequency.timeSeconds, data.timeFrequency.frequencyHz, ...
+        10*log10(max(data.timeFrequency.power(:, :, channel), realmin)));
+    axis xy; xlabel('Time (s)'); ylabel('Frequency (Hz)'); colorbar;
+    title('Time-frequency power (channel ' + string(channel) + ')');
+else
+    text(0.1, 0.5, 'Run lfp_compute_time_frequency to display the STFT.'); axis off;
 end
 end
 
