@@ -15,12 +15,14 @@
 
 - 最低设计版本：MATLAB R2022b；
 - 当前开发机检测到：MATLAB R2024a、Signal Processing Toolbox、Statistics and Machine Learning Toolbox、FieldTrip；
-- 当前未检测到 EEGLAB 或 MATLAB 版 FOOOF/specparam；
+- 当前未检测到 EEGLAB 或 MATLAB 版 FOOOF/specparam；后续频谱参数化优先使用 FieldTrip 或 MATLAB 原生实现；
 - 不在运行时下载依赖。可选工具箱只用于加速或扩展，基础 MATLAB 路径负责核心兼容性。
 
 ## 当前状态
 
-当前只有项目入口和最小测试。具体 CSV 多通道组织方式、单位、伪影阈值和非周期拟合方案仍需用户确认；这些决定确认后才会实现核心算法。
+当前已完成项目入口、最小测试和 SceneRay CSV 导入层。当前约定为 1 kHz、μV、40 Hz 谐波保留到拟合前；伪影阈值和非周期拟合细节将在后续模块中实现并单独测试。
+
+`fooof_mat` 是 MATLAB 对 Python FOOOF 的封装，需要 Python 运行环境，因此不纳入本项目的核心依赖。FieldTrip/原生 MATLAB 路径将保持纯 MATLAB 运行。
 
 ## 初始化测试
 

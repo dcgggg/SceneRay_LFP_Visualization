@@ -1,12 +1,12 @@
-# Data format (draft)
+# Data format
 
-The importer will support the SceneRay CSV layout used by this project and a documented generic matrix layout.
+The importer currently supports the confirmed SceneRay CSV layout used by this project. A generic multi-channel matrix adapter remains a later extension.
 
 ## SceneRay draft
 
-The file may contain metadata rows such as `Device Type`, `IPG SN`, `Channel`, `Gain`, and `Collect Time`, followed by a data header containing `TimeIndex` and one or more signal columns. A channel such as `5~6` means bipolar contacts 5 and 6 and is normalized for display as `5-6`.
+The file contains metadata rows such as `Device Type`, `IPG SN`, `Channel`, `Gain`, and `Collect Time`, followed by `Time Index, Voltage, Tag Code`. A channel such as `5~6` means bipolar contacts 5 and 6 and is normalized for display as `5-6`.
 
-The exact multi-channel representation is still a design question: one file with multiple signal columns versus one file per channel. The importer must reject ambiguous sampling-rate or unit metadata rather than silently guessing.
+For the current acquisition, sampling rate is fixed at 1000 Hz and Voltage is fixed at μV. The importer records the original Time Index and Tag Code, while `data.time` is generated in seconds from the fixed sampling rate. Multi-channel file organization will be specified before that adapter is implemented.
 
 ## Canonical MATLAB structure
 

@@ -16,7 +16,7 @@ PSD units are signal-unit-squared per Hz. Band power is the integral of the sele
 
 ## Aperiodic and periodic components
 
-The first MATLAB-native implementation will support a fixed log-log aperiodic model and report offset, exponent, residual/error, and fit quality separately from periodic peaks. Knee fitting will be designed as a separate mode. The project will not call Python FOOOF at runtime.
+The first MATLAB-native implementation will support a fixed log-log aperiodic model and report offset, exponent, residual/error, and fit quality separately from periodic peaks. Knee fitting will be designed as a separate mode. FieldTrip or native MATLAB implementations may be used, but the project will not call Python FOOOF at runtime. The 40 Hz harmonic bins remain in the PSD and are interpolated only in the spectrum supplied to the parameterization step.
 
 ## Testing
 
