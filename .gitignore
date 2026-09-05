@@ -1,0 +1,31 @@
+# MATLAB generated files
+*.asv
+*.m~
+*.autosave
+slprj/
+codegen/
+*.mex*
+*.mltbx
+
+# Test and coverage output
+coverage/
+test-results/
+
+# User data and generated analysis output
+data/raw/
+data/private/
+results/
+*_results/
+*.mat
+*.fig
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor and temporary files
+.vscode/
+.idea/
+*.swp
+*.tmp
