@@ -8,7 +8,9 @@ function results = analyze_lfp_csv(filePath, varargin)
 % from a separate analysis signal after mean removal and optional high-pass
 % and line-noise filtering.
 %
-% Required toolbox: Signal Processing Toolbox (pwelch, butter, filtfilt).
+% Required toolbox: Signal Processing Toolbox (butter, filtfilt, hann,
+% iirnotch). Welch PSD is implemented explicitly so contaminated windows
+% can be excluded instead of silently contributing broadband power.
 
     narginchk(1, inf);
 
@@ -21,6 +23,13 @@ function results = analyze_lfp_csv(filePath, varargin)
     addParameter(parser, 'NotchBandwidthHz', 2, @(x) isnumeric(x) && isscalar(x) && x > 0);
     addParameter(parser, 'WindowSeconds', 4, @(x) isnumeric(x) && isscalar(x) && x > 0);
     addParameter(parser, 'OverlapFraction', 0.5, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
+    addParameter(parser, 'ArtifactRejection', true, @(x) islogical(x) && isscalar(x));
+    addParameter(parser, 'ArtifactAmplitudeMAD', 8, @(x) isnumeric(x) && isscalar(x) && x > 0);
+    addParameter(parser, 'ArtifactDerivativeMAD', 8, @(x) isnumeric(x) && isscalar(x) && x > 0);
+    addParameter(parser, 'ArtifactAbsoluteThreshold_uV', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0));
+    addParameter(parser, 'ArtifactPaddingSeconds', 1, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+    addParameter(parser, 'MaxArtifactFractionPerWindow', 0.01, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x < 1);
+    addParameter(parser, 'MinCleanWindows', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1 && mod(x, 1) == 0);
     addParameter(parser, 'PSDMaxHz', 100, @(x) isnumeric(x) && isscalar(x) && x > 0);
     addParameter(parser, 'TotalPowerRangeHz', [1 100], @(x) isnumeric(x) && numel(x) == 2 && x(1) >= 0 && x(2) > x(1));
     addParameter(parser, 'Bands', defaultBands(), @isValidBands);
@@ -82,31 +91,42 @@ function results = analyze_lfp_csv(filePath, varargin)
             opt.LineNoiseHz, opt.NotchBandwidthHz);
     end
 
+    rawMin = min(voltage_uV);
+    rawMax = max(voltage_uV);
+    minHitPercent = 100 * nnz(voltage_uV == rawMin) / nSamples;
+    maxHitPercent = 100 * nnz(voltage_uV == rawMax) / nSamples;
+
     windowSamples = min(nSamples, max(16, round(opt.WindowSeconds * fs)));
     overlapSamples = min(windowSamples - 1, round(opt.OverlapFraction * windowSamples));
     nfft = max(windowSamples, 2 ^ nextpow2(windowSamples));
     window = hann(windowSamples, 'periodic');
-    [psd_uV2_per_Hz, frequency_Hz] = pwelch(analysis_uV, window, ...
-        overlapSamples, nfft, fs, 'onesided');
+    [artifactMask, artifactInfo] = detectArtifacts(voltage_uV, fs, opt, ...
+        minHitPercent, maxHitPercent);
+    [psd_uV2_per_Hz, frequency_Hz, psdWindowTable] = ...
+        calculateRejectedWindowWelch(analysis_uV, artifactMask, fs, window, ...
+        overlapSamples, nfft, opt);
+    acceptedWindows = nnz(psdWindowTable.Accepted);
+    totalWindows = height(psdWindowTable);
+    rejectedWindows = totalWindows - acceptedWindows;
+    artifactSamplePercent = 100 * nnz(artifactMask) / nSamples;
 
     bands = normalizeBands(opt.Bands);
     bandPowerTable = calculateBandPowers(frequency_Hz, psd_uV2_per_Hz, ...
         bands, opt.TotalPowerRangeHz, fs);
 
-    rawMin = min(voltage_uV);
-    rawMax = max(voltage_uV);
-    minHitPercent = 100 * nnz(voltage_uV == rawMin) / nSamples;
-    maxHitPercent = 100 * nnz(voltage_uV == rawMax) / nSamples;
     signalMetrics = table( ...
         ["Sample count"; "Duration"; "Raw mean"; "Raw standard deviation"; ...
          "Raw RMS"; "Raw minimum"; "Raw maximum"; "Raw peak-to-peak"; ...
          "Analysis RMS"; "Input non-finite samples"; ...
-         "Samples at observed minimum"; "Samples at observed maximum"], ...
+         "Samples at observed minimum"; "Samples at observed maximum"; ...
+         "Artifact-marked samples"; "PSD windows total"; ...
+         "PSD windows accepted"; "PSD windows rejected"], ...
         [nSamples; nSamples/fs; mean(voltage_uV); std(voltage_uV); ...
          rms(voltage_uV); rawMin; rawMax; range(voltage_uV); ...
-         rms(analysis_uV); nnz(missingMask); minHitPercent; maxHitPercent], ...
+         rms(analysis_uV); nnz(missingMask); minHitPercent; maxHitPercent; ...
+         artifactSamplePercent; totalWindows; acceptedWindows; rejectedWindows], ...
         ["samples"; "s"; "uV"; "uV"; "uV"; "uV"; "uV"; "uV"; "uV"; ...
-         "samples"; "%"; "%"], ...
+         "samples"; "%"; "%"; "%"; "windows"; "windows"; "windows"], ...
         'VariableNames', {'Metric', 'Value', 'Unit'});
 
     qualityFlags = strings(0, 1);
@@ -119,6 +139,12 @@ function results = analyze_lfp_csv(filePath, varargin)
     if any(missingMask)
         qualityFlags(end+1, 1) = sprintf('%d non-finite voltage samples were interpolated.', nnz(missingMask));
     end
+    if opt.ArtifactRejection && rejectedWindows > 0
+        qualityFlags(end+1, 1) = sprintf([ ...
+            'Artifact rejection excluded %d/%d PSD windows (%.3g%%). ' ...
+            'Band powers use only the %d accepted windows.'], ...
+            rejectedWindows, totalWindows, 100*rejectedWindows/totalWindows, acceptedWindows);
+    end
 
     metadata.SamplingRate_Hz = fs;
     metadata.SamplingRateSource = fsSource;
@@ -128,6 +154,9 @@ function results = analyze_lfp_csv(filePath, varargin)
     metadata.LastTimeIndex = sampleIndex(end);
     metadata.ActualDuration_s = nSamples / fs;
     metadata.PreprocessingForPSD = char(preprocessing);
+    metadata.ArtifactRejectionEnabled = opt.ArtifactRejection;
+    metadata.PSDWindowsAccepted = acceptedWindows;
+    metadata.PSDWindowsRejected = rejectedWindows;
     metadata.InputFile = filePath;
 
     results = struct();
@@ -136,6 +165,9 @@ function results = analyze_lfp_csv(filePath, varargin)
     results.Time_s = time_s;
     results.RawVoltage_uV = voltage_uV;
     results.AnalysisVoltage_uV = analysis_uV;
+    results.ArtifactMask = artifactMask;
+    results.ArtifactInfo = artifactInfo;
+    results.PSDWindows = psdWindowTable;
     results.TagCode = tagCode;
     results.Frequency_Hz = frequency_Hz;
     results.PSD_uV2_per_Hz = psd_uV2_per_Hz;
@@ -200,12 +232,128 @@ function bands = normalizeBands(inputBands)
 end
 
 function assertSignalToolboxFunctions()
-    required = {'pwelch', 'butter', 'filtfilt', 'hann', 'iirnotch'};
+    required = {'butter', 'filtfilt', 'hann', 'iirnotch'};
     missing = required(cellfun(@(f) exist(f, 'file') == 0, required));
     if ~isempty(missing)
         error('LFP:MissingToolbox', ...
             'Signal Processing Toolbox functions are missing: %s', strjoin(missing, ', '));
     end
+end
+
+function [artifactMask, info] = detectArtifacts(raw_uV, fs, opt, minHitPercent, maxHitPercent)
+    n = numel(raw_uV);
+    amplitudeCenter = median(raw_uV, 'omitnan');
+    amplitudeScale = robustStd(raw_uV);
+    derivative = [0; diff(raw_uV)];
+    derivativeCenter = median(derivative, 'omitnan');
+    derivativeScale = robustStd(derivative);
+
+    amplitudeThreshold_uV = opt.ArtifactAmplitudeMAD * amplitudeScale;
+    derivativeThreshold_uV_perSample = opt.ArtifactDerivativeMAD * derivativeScale;
+    amplitudeMask = abs(raw_uV - amplitudeCenter) > amplitudeThreshold_uV;
+    derivativeMask = abs(derivative - derivativeCenter) > derivativeThreshold_uV_perSample;
+
+    absoluteMask = false(n, 1);
+    if ~isempty(opt.ArtifactAbsoluteThreshold_uV)
+        absoluteMask = abs(raw_uV) > opt.ArtifactAbsoluteThreshold_uV;
+    end
+
+    railMask = false(n, 1);
+    if minHitPercent > 0.1
+        railMask = railMask | raw_uV == min(raw_uV);
+    end
+    if maxHitPercent > 0.1
+        railMask = railMask | raw_uV == max(raw_uV);
+    end
+
+    baseMask = amplitudeMask | derivativeMask | absoluteMask | railMask | ~isfinite(raw_uV);
+    if opt.ArtifactRejection
+        paddingSamples = round(opt.ArtifactPaddingSeconds * fs);
+        if paddingSamples > 0 && any(baseMask)
+            artifactMask = movmax(baseMask, [paddingSamples paddingSamples]) > 0;
+        else
+            artifactMask = baseMask;
+        end
+    else
+        artifactMask = false(n, 1);
+        paddingSamples = 0;
+    end
+
+    info = struct();
+    info.Enabled = opt.ArtifactRejection;
+    info.AmplitudeCenter_uV = amplitudeCenter;
+    info.AmplitudeRobustSD_uV = amplitudeScale;
+    info.AmplitudeThresholdFromCenter_uV = amplitudeThreshold_uV;
+    info.DerivativeCenter_uV_perSample = derivativeCenter;
+    info.DerivativeRobustSD_uV_perSample = derivativeScale;
+    info.DerivativeThresholdFromCenter_uV_perSample = derivativeThreshold_uV_perSample;
+    info.AbsoluteThreshold_uV = opt.ArtifactAbsoluteThreshold_uV;
+    info.PaddingSamples = paddingSamples;
+    info.PaddingSeconds = paddingSamples / fs;
+    info.BaseArtifactSamples = nnz(baseMask);
+    info.PaddedArtifactSamples = nnz(artifactMask);
+end
+
+function value = robustStd(x)
+    center = median(x, 'omitnan');
+    value = 1.4826 * median(abs(x - center), 'omitnan');
+    if ~isfinite(value) || value <= eps(max(abs(center), 1))
+        value = std(x, 'omitnan');
+    end
+    if ~isfinite(value) || value <= 0
+        value = eps;
+    end
+end
+
+function [pxx, f, windowTable] = calculateRejectedWindowWelch( ...
+        signal, artifactMask, fs, window, overlapSamples, nfft, opt)
+    windowSamples = numel(window);
+    stepSamples = windowSamples - overlapSamples;
+    starts = (1:stepSamples:(numel(signal) - windowSamples + 1))';
+    if isempty(starts)
+        error('LFP:NoPsdWindows', 'The signal is shorter than one PSD window.');
+    end
+    ends = starts + windowSamples - 1;
+    artifactFraction = zeros(numel(starts), 1);
+    for k = 1:numel(starts)
+        artifactFraction(k) = mean(artifactMask(starts(k):ends(k)));
+    end
+    accepted = artifactFraction <= opt.MaxArtifactFractionPerWindow;
+    if ~opt.ArtifactRejection
+        accepted(:) = true;
+    end
+    if nnz(accepted) < opt.MinCleanWindows
+        error('LFP:TooFewCleanWindows', [ ...
+            'Only %d clean PSD windows remain (minimum %d). Review the raw signal or adjust ' ...
+            'ArtifactAmplitudeMAD, ArtifactDerivativeMAD, ArtifactPaddingSeconds, ' ...
+            'MaxArtifactFractionPerWindow, or disable ArtifactRejection explicitly.'], ...
+            nnz(accepted), opt.MinCleanWindows);
+    end
+
+    nFrequencyBins = floor(nfft / 2) + 1;
+    pxx = zeros(nFrequencyBins, 1);
+    normalization = fs * sum(window .^ 2);
+    acceptedIndexes = find(accepted);
+    for k = 1:numel(acceptedIndexes)
+        w = acceptedIndexes(k);
+        segment = signal(starts(w):ends(w));
+        segment = detrend(segment, 'constant') .* window;
+        spectrum = fft(segment, nfft);
+        oneSided = abs(spectrum(1:nFrequencyBins)) .^ 2 / normalization;
+        if rem(nfft, 2) == 0
+            oneSided(2:end-1) = 2 * oneSided(2:end-1);
+        else
+            oneSided(2:end) = 2 * oneSided(2:end);
+        end
+        pxx = pxx + oneSided;
+    end
+    pxx = pxx / numel(acceptedIndexes);
+    f = (0:nFrequencyBins-1)' * (fs / nfft);
+
+    windowTable = table((1:numel(starts))', starts, ends, ...
+        (starts - 1) / fs, ends / fs, artifactFraction, accepted, ...
+        'VariableNames', {'Window', 'StartSample', 'EndSample', ...
+        'StartTime_s', 'EndTime_s', 'ArtifactFraction', 'Accepted'});
 end
 
 function [metadata, sampleIndex, voltage_uV, tagCode] = readLfpCsv(filePath)
@@ -356,19 +504,33 @@ function figures = createFigures(results, opt)
     identity = sprintf('IPG %s | Ch %s | Fs %.6g Hz', meta.IPGSN, channelText, meta.SamplingRate_Hz);
     visible = char(string(opt.FigureVisible));
     blue = [0.12 0.35 0.62];
+    artifactOrange = [0.85 0.33 0.10];
     charcoal = [0.15 0.17 0.20];
 
     rawFig = figure('Name', 'Raw LFP waveform', 'Color', 'w', 'Visible', visible);
     tiledlayout(rawFig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     nexttile;
-    plot(results.Time_s, results.RawVoltage_uV, 'Color', blue, 'LineWidth', 0.65);
+    rawLine = plot(results.Time_s, results.RawVoltage_uV, 'Color', blue, 'LineWidth', 0.65);
+    hold on;
+    artifactVoltage = results.RawVoltage_uV;
+    artifactVoltage(~results.ArtifactMask) = NaN;
+    artifactLine = plot(results.Time_s, artifactVoltage, 'Color', artifactOrange, 'LineWidth', 0.8);
+    hold off;
     grid on; box off;
     xlabel('Time (s)'); ylabel('Voltage (\muV)');
     title('Raw LFP waveform'); subtitle(identity, 'Interpreter', 'none');
+    if any(results.ArtifactMask)
+        legend([rawLine artifactLine], {'Raw signal', 'Artifact-rejected region'}, ...
+            'Location', 'best', 'Box', 'off');
+    end
     nexttile;
     previewMask = results.Time_s <= min(opt.PreviewSeconds, results.Time_s(end));
     plot(results.Time_s(previewMask), results.RawVoltage_uV(previewMask), ...
         'Color', blue, 'LineWidth', 0.8);
+    hold on;
+    plot(results.Time_s(previewMask), artifactVoltage(previewMask), ...
+        'Color', artifactOrange, 'LineWidth', 0.9);
+    hold off;
     grid on; box off;
     xlabel('Time (s)'); ylabel('Voltage (\muV)');
     title(sprintf('Raw waveform preview (first %.3g s)', min(opt.PreviewSeconds, results.Time_s(end))));
@@ -382,7 +544,9 @@ function figures = createFigures(results, opt)
     grid on; box off; xlim([0.5 maxHz]);
     xlabel('Frequency (Hz)'); ylabel('PSD (dB re 1 \muV^2/Hz)');
     title('Power spectral density (Welch method)');
-    subtitle({identity; ['PSD signal: ', meta.PreprocessingForPSD]}, 'Interpreter', 'none');
+    subtitle(sprintf('%s | Clean windows %d/%d', ...
+        identity, meta.PSDWindowsAccepted, ...
+        meta.PSDWindowsAccepted + meta.PSDWindowsRejected), 'Interpreter', 'none');
     if ~isempty(opt.LineNoiseHz) && opt.LineNoiseHz <= maxHz
         xline(opt.LineNoiseHz, '--', 'Line noise', 'Color', [0.45 0.45 0.45]);
     end
@@ -417,11 +581,13 @@ function files = saveResults(results, outputDir, inputStem)
     files.SignalMetricsCsv = fullfile(outputDir, [inputStem, '_signal_metrics.csv']);
     files.MetadataCsv = fullfile(outputDir, [inputStem, '_metadata.csv']);
     files.QualityFlagsCsv = fullfile(outputDir, [inputStem, '_quality_flags.csv']);
+    files.PsdWindowsCsv = fullfile(outputDir, [inputStem, '_psd_windows.csv']);
     files.PsdCsv = fullfile(outputDir, [inputStem, '_psd.csv']);
     files.MatFile = fullfile(outputDir, [inputStem, '_analysis.mat']);
     writetable(results.BandPower, files.BandPowerCsv);
     writetable(results.SignalMetrics, files.SignalMetricsCsv);
     writetable(results.QualityFlags, files.QualityFlagsCsv);
+    writetable(results.PSDWindows, files.PsdWindowsCsv);
     writetable(table(results.Frequency_Hz, results.PSD_uV2_per_Hz, ...
         'VariableNames', {'Frequency_Hz', 'PSD_uV2_per_Hz'}), files.PsdCsv);
 
