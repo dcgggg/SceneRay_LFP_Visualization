@@ -1,0 +1,17 @@
+# Patient/source data and generated analysis results
+data/raw/
+data/private/
+*_results/
+*.mat
+
+# MATLAB generated files
+*.asv
+*.autosave
+slprj/
+codegen/
+*.mex*
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
