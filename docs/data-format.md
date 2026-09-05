@@ -4,9 +4,9 @@ The importer currently supports the confirmed SceneRay CSV layout used by this p
 
 ## SceneRay draft
 
-The file contains metadata rows such as `Device Type`, `IPG SN`, `Channel`, `Gain`, and `Collect Time`, followed by `Time Index, Voltage, Tag Code`. A channel such as `5~6` means bipolar contacts 5 and 6 and is normalized for display as `5-6`.
+The file contains one or more repeated blocks. Each block is identified by a `Channel` metadata row, followed by metadata such as `Device Type`, `IPG SN`, `Gain`, and `Collect Time`, and then exactly one `Time Index, Voltage, Tag Code` header. The importer uses the `Channel` rows to determine the channel count and uses the nearest block-local `Time Index` header to delimit samples. A channel such as `5~6` means bipolar contacts 5 and 6 and is normalized for display as `5-6`.
 
-For the current acquisition, sampling rate is fixed at 1000 Hz and Voltage is fixed at μV. The importer records the original Time Index and Tag Code, while `data.time` is generated in seconds from the fixed sampling rate. Multi-channel file organization will be specified before that adapter is implemented.
+For the current acquisition, sampling rate is fixed at 1000 Hz and Voltage is fixed at μV. The importer records the original Time Index and Tag Code for every block, while `data.time` is generated in seconds from the fixed sampling rate. Blocks must have equal sample counts so they can be represented as one samples × channels matrix; inconsistent counts are rejected instead of silently aligning or truncating data.
 
 ## Canonical MATLAB structure
 
@@ -20,6 +20,8 @@ data.metadata           % source/device/channel metadata
 data.artifacts          % interval and channel-level annotations
 data.processingHistory  % ordered struct array of operations and parameters
 ```
+
+For multi-block files, `data.metadata.channelRows`, `blockStarts`, `blockEnds`, and `headerRows` preserve the row-level parsing decisions for auditability. `data.metadata.blocks` stores metadata for each channel independently.
 
 ## Validation policy
 

@@ -37,7 +37,7 @@ end
 
 function testCustomSamplingRateAndUnits(testCase)
 ensure_src_on_path(testCase);
-filename = create_fixture(testCase, ["Time Index, Voltage,"; "0,1,"; "1,2,"]);
+filename = create_fixture(testCase, ["Channel,0~1,"; "Time Index, Voltage,"; "0,1,"; "1,2,"]);
 data = lfp_import_scenray_csv(filename, SamplingRateHz=2000, Units="mV");
 verifyEqual(testCase, data.fs, 2000);
 verifyEqual(testCase, data.units, "mV");

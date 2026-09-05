@@ -35,12 +35,23 @@ for rowIndex = 1:size(cells, 1)
     normalizedFirstColumn(rowIndex) = normalize_token(cells{rowIndex, 1});
 end
 
-headerRows = find(normalizedFirstColumn == "timeindex");
-if isempty(headerRows)
-    error('LFP:MissingDataHeader', 'Could not find a Time Index header in %s.', filename);
+channelRows = find(normalizedFirstColumn == "channel");
+if isempty(channelRows)
+    error('LFP:MissingChannelMetadata', 'Could not find any Channel metadata rows in %s.', filename);
 end
 
-nBlocks = numel(headerRows);
+nBlocks = numel(channelRows);
+blockStarts = zeros(nBlocks, 1);
+blockEnds = zeros(nBlocks, 1);
+headerRows = zeros(nBlocks, 1);
+for blockIndex = 1:nBlocks
+    if blockIndex == 1
+        lowerBound = 1;
+    else
+        lowerBound = channelRows(blockIndex - 1) + 1;
+    end
+    blockStarts(blockIndex) = find_block_start(normalizedFirstColumn, channelRows(blockIndex), lowerBound);
+end
 blocks = repmat(empty_block(), nBlocks, 1);
 signals = cell(nBlocks, 1);
 timeIndices = cell(nBlocks, 1);
@@ -48,8 +59,20 @@ tags = cell(nBlocks, 1);
 totalSkippedRows = 0;
 
 for blockIndex = 1:nBlocks
-    headerRow = headerRows(blockIndex);
-    blockStart = find_block_start(normalizedFirstColumn, headerRow);
+    blockStart = blockStarts(blockIndex);
+    if blockIndex < nBlocks
+        blockEnd = blockStarts(blockIndex + 1) - 1;
+    else
+        blockEnd = size(cells, 1);
+    end
+    blockEnds(blockIndex) = blockEnd;
+    headerCandidates = find(normalizedFirstColumn(blockStart:blockEnd) == "timeindex") + blockStart - 1;
+    if isempty(headerCandidates)
+        error('LFP:MissingDataHeader', ...
+            'Could not find a Time Index header for Channel row %d.', channelRows(blockIndex));
+    end
+    headerRow = headerCandidates(1);
+    headerRows(blockIndex) = headerRow;
     if normalize_token(cells{headerRow, 2}) ~= "voltage"
         error('LFP:MissingVoltageColumn', ...
             'Expected Voltage as the second data column in block %d.', blockIndex);
@@ -57,11 +80,7 @@ for blockIndex = 1:nBlocks
 
     blocks(blockIndex) = parse_block_metadata(cells, normalizedFirstColumn, blockStart, headerRow);
     firstRowAfterHeader = headerRow + 1;
-    if blockIndex < nBlocks
-        lastRowInBlock = headerRows(blockIndex + 1) - 1;
-    else
-        lastRowInBlock = size(cells, 1);
-    end
+    lastRowInBlock = blockEnd;
     [timeIndices{blockIndex}, signals{blockIndex}, tags{blockIndex}, skippedRows] = ...
         parse_signal_rows(cells, firstRowAfterHeader, lastRowInBlock);
     totalSkippedRows = totalSkippedRows + skippedRows;
@@ -89,6 +108,10 @@ metadata.sourceFormat = "SceneRay CSV";
 metadata.samplingRateHz = options.SamplingRateHz;
 metadata.units = options.Units;
 metadata.blockCount = nBlocks;
+metadata.channelRows = channelRows;
+metadata.blockStarts = blockStarts;
+metadata.blockEnds = blockEnds;
+metadata.headerRows = headerRows;
 metadata.skippedDataRows = totalSkippedRows;
 metadata.blocks = blocks;
 metadata.timeIndex = timeIndex;
@@ -127,10 +150,10 @@ block = struct('deviceType', "", 'ipgSN', "", 'channelRaw', "", ...
     'electrodeGroup', "unknown", 'collectTimeSeconds', NaN, 'gain', NaN);
 end
 
-function blockStart = find_block_start(normalizedFirstColumn, headerRow)
-candidate = find(normalizedFirstColumn(1:headerRow - 1) == "devicetype", 1, 'last');
+function blockStart = find_block_start(normalizedFirstColumn, channelRow, lowerBound)
+candidate = find(normalizedFirstColumn(lowerBound:channelRow) == "devicetype", 1, 'last') + lowerBound - 1;
 if isempty(candidate)
-    blockStart = max(1, headerRow - 1);
+    blockStart = channelRow;
 else
     blockStart = candidate;
 end

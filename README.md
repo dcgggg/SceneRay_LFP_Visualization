@@ -20,7 +20,7 @@
 
 ## 当前状态
 
-当前已完成项目入口、最小测试和 SceneRay CSV 导入层。当前约定为 1 kHz、μV、40 Hz 谐波保留到拟合前；伪影阈值和非周期拟合细节将在后续模块中实现并单独测试。
+当前已完成项目入口、最小测试和 SceneRay CSV 导入层。导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；当前约定为 1 kHz、μV、40 Hz 谐波保留到拟合前。伪影阈值和非周期拟合细节将在后续模块中实现并单独测试。
 
 `fooof_mat` 是 MATLAB 对 Python FOOOF 的封装，需要 Python 运行环境，因此不纳入本项目的核心依赖。FieldTrip/原生 MATLAB 路径将保持纯 MATLAB 运行。
 
