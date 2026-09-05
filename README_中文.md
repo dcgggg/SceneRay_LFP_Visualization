@@ -7,7 +7,7 @@
 
 需要 MATLAB Signal Processing Toolbox。
 
-## 最快用法
+## 用法
 
 把本文件夹加入 MATLAB Path，然后运行：
 
