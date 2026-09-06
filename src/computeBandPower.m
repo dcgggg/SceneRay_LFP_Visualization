@@ -32,6 +32,7 @@ if ~isempty(modelResult)
 end
 resultData = lfp_compute_band_power(data, Bands=bands);
 bandResult = resultData.bandPower;
+bandResult.processingHistory = resultData.processingHistory;
 end
 
 function value = get_field(s, name, defaultValue)

@@ -30,9 +30,10 @@ else
     figureHandle = ancestor(parent, 'figure');
     if isempty(figureHandle), figureHandle = figure('Visible', visible, 'Color', 'w'); end
 end
-layout = tiledlayout(figureHandle, 4, 1, 'TileSpacing', 'compact');
-handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(4,1), ...
-    'rawLines', gobjects(0), 'cleanLines', gobjects(0), 'patches', gobjects(0));
+layout = tiledlayout(figureHandle, 3, 2, 'TileSpacing', 'compact');
+handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(6,1), ...
+    'rawLines', gobjects(0), 'cleanLines', gobjects(0), 'patches', gobjects(0), ...
+    'histograms', gobjects(0), 'typeBars', gobjects(0));
 
 handles.axes(1) = nexttile(layout);
 handles.rawLines = plot(handles.axes(1), time(1:sampleLimit), signal(1:sampleLimit, channels), 'k');
@@ -69,13 +70,59 @@ xlabel(handles.axes(3), 'Time (s)'); ylabel(handles.axes(3), string(data.units))
 title(handles.axes(3), 'Local zoom (same time and y-axis scale)'); grid(handles.axes(3), 'on');
 
 handles.axes(4) = nexttile(layout);
-hold(handles.axes(4), 'on');
-for channel = channels
-    histogram(handles.axes(4), signal(:,channel), 'Normalization', 'probability', ...
-        'DisplayStyle', 'stairs', 'LineWidth', 1.0);
+rawValues = signal(:, channels); rawValues = rawValues(isfinite(rawValues));
+cleanValues = cleanData.cleanedSignal(:, channels); cleanValues = cleanValues(isfinite(cleanValues));
+allValues = [rawValues; cleanValues];
+if numel(allValues) >= 2 && min(allValues) < max(allValues)
+    edges = linspace(min(allValues), max(allValues), 51);
+    handles.histograms(1) = histogram(handles.axes(4), rawValues, edges, ...
+        'Normalization', 'probability', 'DisplayStyle', 'stairs', ...
+        'LineWidth', 1.2, 'EdgeColor', [0.1 0.1 0.1], 'DisplayName', 'Raw');
+    hold(handles.axes(4), 'on');
+    if ~isempty(cleanValues)
+        handles.histograms(2) = histogram(handles.axes(4), cleanValues, edges, ...
+            'Normalization', 'probability', 'DisplayStyle', 'stairs', ...
+            'LineWidth', 1.2, 'EdgeColor', [0.0 0.3 0.8], 'DisplayName', 'After mask (finite samples)');
+    end
+    hold(handles.axes(4), 'off');
+else
+    text(handles.axes(4), 0.1, 0.5, 'Insufficient finite samples for amplitude histogram.');
 end
-hold(handles.axes(4), 'off'); xlabel(handles.axes(4), string(data.units)); ylabel('Probability');
-title(handles.axes(4), 'Raw amplitude distributions'); grid(handles.axes(4), 'on');
+xlabel(handles.axes(4), string(data.units)); ylabel(handles.axes(4), 'Probability');
+title(handles.axes(4), 'Amplitude distributions before/after masking');
+legend(handles.axes(4), 'Location', 'best'); grid(handles.axes(4), 'on');
+
+handles.axes(5) = nexttile(layout);
+channelPercentage = get_summary_field(artifactResult, 'channelArtifactPercentage', zeros(1, nChannels));
+bar(handles.axes(5), 1:nChannels, channelPercentage);
+xlabel(handles.axes(5), 'Channel'); ylabel(handles.axes(5), 'Artifact samples (%)');
+title(handles.axes(5), 'Artifact fraction by channel'); grid(handles.axes(5), 'on');
+
+handles.axes(6) = nexttile(layout);
+typeNames = strings(0, 1); typeCounts = zeros(0, 1); typeDurations = zeros(0, 1);
+if isfield(artifactResult, 'summary') && isfield(artifactResult.summary, 'countsByType')
+    names = fieldnames(artifactResult.summary.countsByType);
+    typeNames = string(names(:));
+    typeCounts = zeros(numel(names), 1); typeDurations = zeros(numel(names), 1);
+    for index = 1:numel(names)
+        typeCounts(index) = artifactResult.summary.countsByType.(names{index});
+        if isfield(artifactResult.summary, 'durationByTypeSeconds') && ...
+                isfield(artifactResult.summary.durationByTypeSeconds, names{index})
+            typeDurations(index) = artifactResult.summary.durationByTypeSeconds.(names{index});
+        end
+    end
+end
+if isempty(typeNames)
+    text(handles.axes(6), 0.1, 0.5, 'No artifact events.'); axis(handles.axes(6), 'off');
+else
+    yyaxis(handles.axes(6), 'left');
+    handles.typeBars = bar(handles.axes(6), categorical(typeNames), typeCounts);
+    ylabel(handles.axes(6), 'Event count');
+    yyaxis(handles.axes(6), 'right');
+    plot(handles.axes(6), categorical(typeNames), typeDurations, 'o-', 'LineWidth', 1.2);
+    ylabel(handles.axes(6), 'Total duration (s)');
+    title(handles.axes(6), 'Artifact types and duration'); grid(handles.axes(6), 'on');
+end
 end
 
 function intervals = logical_to_intervals(mask, fs)
@@ -86,4 +133,12 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function value = get_summary_field(artifactResult, name, defaultValue)
+value = defaultValue;
+if isfield(artifactResult, 'summary') && isfield(artifactResult.summary, name) && ...
+        ~isempty(artifactResult.summary.(name))
+    value = artifactResult.summary.(name);
+end
 end

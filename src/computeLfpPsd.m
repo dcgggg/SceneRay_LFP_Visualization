@@ -31,4 +31,7 @@ resultData = lfp_compute_psd(cleanData, ...
     AggregationMethod=string(psdCfg.aggregationMethod), ...
     FrequencyRangeHz=psdCfg.frequencyRange);
 psdResult = resultData.spectrum;
+% Expose the updated history so a GUI/script can persist the complete audit
+% trail without needing to use the legacy DATA-returning entry point.
+psdResult.processingHistory = resultData.processingHistory;
 end
