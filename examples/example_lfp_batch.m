@@ -11,7 +11,8 @@ outputFolder = "results";
 cfg = lfpDefaultConfig();
 
 batch = analyzeLfpFolder(inputFolder, cfg, ...
-    OutputFolder=outputFolder, MakeFigures=true, ExportResults=true);
+    OutputFolder=outputFolder, MakeFigures=true, ExportResults=true, ...
+    KeepFiguresOpen=true);
 
 for fileIndex = 1:batch.fileCount
     item = batch.files(fileIndex);

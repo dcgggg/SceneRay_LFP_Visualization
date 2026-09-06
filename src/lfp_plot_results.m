@@ -8,6 +8,7 @@ arguments
     options.Visible (1,1) string {mustBeMember(options.Visible, ["on", "off"])} = "on"
     options.ChannelIndex double {mustBeInteger, mustBePositive} = []
     options.MaxPlotSeconds (1,1) double {mustBeFinite, mustBePositive} = 30
+    options.FigurePosition double = []
 end
 
 if ~isfield(data, 'signal') || ~isfield(data, 'fs')
@@ -27,7 +28,12 @@ sampleLimit = min(nSamples, max(1, round(options.MaxPlotSeconds * data.fs)));
 
 figureHandle = figure('Visible', char(options.Visible), 'Color', 'w', ...
     'Name', 'SceneRay LFP analysis', 'NumberTitle', 'off');
-tiledlayout(4, 1, 'TileSpacing', 'compact');
+if numel(options.FigurePosition) == 4 && all(isfinite(options.FigurePosition))
+    figureHandle.Position = options.FigurePosition(:)';
+else
+    figureHandle.Position = [80 80 1600 1100];
+end
+layout = tiledlayout(figureHandle, 4, 1, 'TileSpacing', 'loose', 'Padding', 'loose');
 nexttile;
 plot(time(1:sampleLimit), data.signal(1:sampleLimit, channels), 'LineWidth', 0.8);
 xlabel('Time (s)'); ylabel("Signal (" + string(data.units) + ")");
@@ -87,6 +93,11 @@ if isfield(data, 'timeFrequency')
 else
     text(0.1, 0.5, 'Run lfp_compute_time_frequency to display the STFT.'); axis off;
 end
+displayName = data_display_name(data);
+if strlength(displayName) > 0
+    sgtitle(figureHandle, displayName, 'Interpreter', 'none');
+end
+lfp_apply_plot_config(figureHandle, struct('fontSize', 10), layout);
 end
 
 function labels = channel_labels(data, channels)
@@ -97,5 +108,26 @@ for index = 1:numel(channels)
     else
         labels(index) = "channel_" + channels(index);
     end
+end
+end
+
+function name = data_display_name(data)
+name = "";
+if isfield(data, 'metadata') && isfield(data.metadata, 'displayName') && ...
+        ~isempty(data.metadata.displayName)
+    name = string(data.metadata.displayName);
+    return;
+end
+source = ""; ipg = "";
+if isfield(data, 'metadata')
+    if isfield(data.metadata, 'sourceFileName'), source = string(data.metadata.sourceFileName); end
+    if isfield(data.metadata, 'ipgSN'), ipg = string(data.metadata.ipgSN); end
+end
+if strlength(source) > 0 && strlength(ipg) > 0
+    name = source + " | IPG SN " + ipg;
+elseif strlength(source) > 0
+    name = source;
+elseif strlength(ipg) > 0
+    name = "IPG SN " + ipg;
 end
 end

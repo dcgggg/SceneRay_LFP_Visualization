@@ -73,6 +73,7 @@ if isfield(artifactResult, 'summary') && isfield(artifactResult.summary, 'channe
 else
     text(handles.axes(4), 0.1, 0.5, 'No artifact summary available.'); axis(handles.axes(4), 'off');
 end
+lfp_apply_plot_config(figureHandle, plotCfg, layout);
 end
 
 function value = get_field(s, name, defaultValue)

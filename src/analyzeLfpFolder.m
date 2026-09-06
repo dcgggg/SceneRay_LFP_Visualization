@@ -17,6 +17,7 @@ arguments
     options.OutputFolder (1,1) string = ""
     options.MakeFigures (1,1) logical = false
     options.ExportResults (1,1) logical = false
+    options.KeepFiguresOpen (1,1) logical = false
     options.StopOnError (1,1) logical = false
 end
 
@@ -71,12 +72,15 @@ for fileIndex = 1:numel(csvFiles)
         if options.MakeFigures
             outputFolder = fullfile(options.OutputFolder, safe_name(fileResults(fileIndex).fileName));
             if ~isfolder(outputFolder), mkdir(outputFolder); end
-            create_figures(data, cleanData, artifactResult, psdResult, modelResult, bandResult, cfg.plot, outputFolder);
+            create_figures(data, cleanData, artifactResult, psdResult, modelResult, bandResult, ...
+                cfg.plot, outputFolder, options.KeepFiguresOpen);
         end
         if options.ExportResults
             outputFolder = fullfile(options.OutputFolder, safe_name(fileResults(fileIndex).fileName));
             if ~isfolder(outputFolder), mkdir(outputFolder); end
-            fileResults(fileIndex).exportedFiles = lfp_export_results(cleanData, outputFolder);
+            fileResults(fileIndex).exportedFiles = lfp_export_results(cleanData, outputFolder, ...
+                FigureResolution=get_field(cfg.plot, 'exportResolution', 300), ...
+                FigurePosition=get_field(cfg.plot, 'figurePosition', []));
         end
     catch exception
         fileResults(fileIndex).status = "failed";
@@ -141,31 +145,40 @@ for index = 1:numel(models)
 end
 end
 
-function create_figures(data, cleanData, artifactResult, psdResult, modelResult, bandResult, plotCfg, outputFolder)
+function create_figures(data, cleanData, artifactResult, psdResult, modelResult, bandResult, plotCfg, outputFolder, keepFiguresOpen)
 displayName = string(data.metadata.displayName);
 localCfg = plotCfg;
-localCfg.visible = "off";
+if keepFiguresOpen
+    localCfg.visible = get_field(plotCfg, 'visible', "on");
+else
+    localCfg.visible = "off";
+end
 h = plotArtifactComparison(data, cleanData, artifactResult, localCfg);
-save_figure(h.figure, fullfile(outputFolder, 'artifact_comparison.png'), displayName);
-close(h.figure);
+save_figure(h.figure, fullfile(outputFolder, 'artifact_comparison.png'), displayName, plotCfg);
+if ~keepFiguresOpen, close(h.figure); end
 h = plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, localCfg);
-save_figure(h.figure, fullfile(outputFolder, 'analysis_summary.png'), displayName);
-close(h.figure);
+save_figure(h.figure, fullfile(outputFolder, 'analysis_summary.png'), displayName, plotCfg);
+if ~keepFiguresOpen, close(h.figure); end
 for index = 1:numel(modelResult)
     h = plotSpectralModel(modelResult(index), localCfg);
     save_figure(h.figure, fullfile(outputFolder, sprintf('spectral_model_ch%02d.png', index)), ...
-        displayName + " | " + modelResult(index).channelLabel);
-    close(h.figure);
+        displayName + " | " + modelResult(index).channelLabel, plotCfg);
+    if ~keepFiguresOpen, close(h.figure); end
 end
 end
 
-function save_figure(figureHandle, filename, displayName)
+function save_figure(figureHandle, filename, displayName, plotCfg)
 sgtitle(figureHandle, displayName, 'Interpreter', 'none');
+resolution = get_field(plotCfg, 'exportResolution', 300);
 try
-    exportgraphics(figureHandle, filename, 'Resolution', 150);
+    exportgraphics(figureHandle, filename, 'Resolution', resolution);
 catch
     saveas(figureHandle, filename);
 end
+end
+
+function value = get_field(s, name, defaultValue)
+if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
 end
 
 function value = safe_name(filename)

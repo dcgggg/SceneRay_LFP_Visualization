@@ -65,6 +65,7 @@ end
 hold(handles.axes(2), 'off');
 xlabel(handles.axes(2), 'Frequency (Hz)'); ylabel(handles.axes(2), 'log10 residual');
 title(handles.axes(2), sprintf('Periodic decomposition (%d peaks)', modelResult.nPeaks)); grid(handles.axes(2), 'on');
+lfp_apply_plot_config(figureHandle, plotCfg, layout);
 end
 
 function plotFrequency(ax, frequency, values, cfg, style, displayName)

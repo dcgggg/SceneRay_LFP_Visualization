@@ -32,7 +32,7 @@ Implemented functions:
 - `detectAndHandleArtifacts`, `computeLfpPsd`, `parameterizePowerSpectrum`, `computeBandPower`: stable cfg-based entry points for future GUI use.
 - `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`, `plotAnalysisSummary`: independent before/after and model-result plots.
 
-Plot functions return figure/layout/axes handles and accept an optional `plotCfg.parent` Figure, panel, or tab. Artifact comparison includes raw versus finite masked amplitude distributions, per-channel artifact fractions, and event-count/total-duration summaries by artifact type.
+Plot functions return figure/layout/axes handles and accept an optional `plotCfg.parent` Figure, panel, or tab. Artifact comparison places Raw and Clean/display (NaN-marked) panels vertically for each channel, using the same y-limits for each before/after pair. It also includes raw versus finite masked amplitude distributions, per-channel artifact fractions, and event-count/total-duration summaries by artifact type. Figures default to a 1600×1100-pixel canvas and 300-DPI export; adjust `cfg.plot.figurePosition`, `cfg.plot.tileSpacing`, and `cfg.plot.exportResolution` as needed. Batch plotting can retain interactive windows with `KeepFiguresOpen=true`.
 
 ## Testing
 

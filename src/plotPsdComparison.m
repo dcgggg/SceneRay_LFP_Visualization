@@ -38,6 +38,7 @@ for index = 1:numel(channels)
     xlabel(handles.axes(index), 'Frequency (Hz)'); ylabel(handles.axes(index), 'Power (dB)');
     title(handles.axes(index), sprintf('Channel %d', channel)); legend(handles.axes(index), 'Location', 'best'); grid(handles.axes(index), 'on');
 end
+lfp_apply_plot_config(figureHandle, plotCfg, layout);
 end
 
 function value = get_field(s, name, defaultValue)

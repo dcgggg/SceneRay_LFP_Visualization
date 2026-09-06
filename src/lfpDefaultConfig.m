@@ -69,6 +69,11 @@ cfg.plot.maxPlotSeconds = 30;
 cfg.plot.channelIndex = [];
 cfg.plot.parent = [];
 cfg.plot.showArtifactLabels = true;
+cfg.plot.figurePosition = [80 80 1600 1100];
+cfg.plot.tileSpacing = "loose";
+cfg.plot.tilePadding = "loose";
+cfg.plot.fontSize = 10;
+cfg.plot.exportResolution = 300;
 
 cfg.export = struct();
 cfg.export.exportFigure = true;

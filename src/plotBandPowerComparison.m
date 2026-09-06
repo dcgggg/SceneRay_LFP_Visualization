@@ -40,6 +40,7 @@ end
 handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(1,2));
 handles.axes(1) = nexttile(layout); bar(handles.axes(1), categorical(names), valuesBefore'); title(handles.axes(1), 'Before exclusion'); ylabel(handles.axes(1), 'Total power'); grid(handles.axes(1), 'on');
 handles.axes(2) = nexttile(layout); bar(handles.axes(2), categorical(names), valuesAfter'); title(handles.axes(2), 'After exclusion'); ylabel(handles.axes(2), 'Total power'); grid(handles.axes(2), 'on');
+lfp_apply_plot_config(figureHandle, plotCfg, layout);
 end
 
 function value = get_field(s, name, defaultValue)

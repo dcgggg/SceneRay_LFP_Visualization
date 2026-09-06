@@ -8,6 +8,8 @@ arguments
     data (1,1) struct
     outputFolder (1,1) string
     options.ExportFigure (1,1) logical = true
+    options.FigureResolution (1,1) double {mustBeFinite, mustBePositive} = 300
+    options.FigurePosition double = []
 end
 
 if strlength(strtrim(outputFolder)) == 0
@@ -42,10 +44,10 @@ end
 
 if options.ExportFigure
     files.figurePng = fullfile(outputFolder, 'analysis_overview.png');
-    figureHandle = lfp_plot_results(data, Visible="off");
+    figureHandle = lfp_plot_results(data, Visible="off", FigurePosition=options.FigurePosition);
     cleanup = onCleanup(@() close_if_valid(figureHandle)); %#ok<NASGU>
     try
-        exportgraphics(figureHandle, files.figurePng, 'Resolution', 150);
+        exportgraphics(figureHandle, files.figurePng, 'Resolution', options.FigureResolution);
     catch
         saveas(figureHandle, files.figurePng);
     end
