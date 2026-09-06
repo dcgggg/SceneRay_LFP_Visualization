@@ -194,6 +194,12 @@ for channel = 1:nChannels
     [mask, events] = merge_reason(mask, events, highFrequency, channel, "high_frequency_burst", ...
         get_field(cfg, 'highFrequencyZ', 8), "native.high_frequency_envelope");
 
+    if get_field(cfg, 'strictMode', false)
+        strictBurst = detect_strict_burst(x, fs, cfg);
+        [mask, events] = merge_reason(mask, events, strictBurst, channel, "strict_burst", ...
+            get_field(cfg, 'strictHighFrequencyZ', 4), "native.strict_window_features");
+    end
+
     % 40-Hz interference is preserved for fitting-only interpolation unless
     % a user explicitly enables time-domain line-noise rejection.
     if get_field(cfg, 'lineNoiseDetection', false)
@@ -334,6 +340,106 @@ if isempty(values), return; end
 sigma = robust_scale(values - median(values));
 if sigma > 0
     mask = finite & envelope > median(values) + get_field(cfg, 'highFrequencyZ', 8) * sigma;
+end
+end
+
+function mask = detect_strict_burst(x, fs, cfg)
+% Detect sustained abnormal windows using high-frequency energy, derivative
+% energy, and local range. Complete short windows are marked so a burst with
+% moderate amplitude is not reduced to a few missed samples.
+mask = false(size(x));
+finite = isfinite(x);
+if nnz(finite) < 5
+    return;
+end
+filled = x;
+filled(~finite) = fill_nonfinite(x, finite);
+cutoffHz = get_field(cfg, 'strictHighpassHz', 100);
+windowSamples = max(5, round(get_field(cfg, 'strictWindowSeconds', 0.1) * fs));
+windowSamples = min(windowSamples, numel(x));
+stepSamples = max(1, round(get_field(cfg, 'strictStepSeconds', 0.05) * fs));
+starts = 1:stepSamples:max(1, numel(x) - windowSamples + 1);
+if starts(end) + windowSamples - 1 < numel(x)
+    starts(end + 1) = numel(x) - windowSamples + 1;
+end
+hfRms = NaN(numel(starts), 1);
+derivativeRms = hfRms;
+localRange = hfRms;
+validWindow = false(numel(starts), 1);
+nfft = 2 ^ nextpow2(windowSamples);
+frequency = (0:floor(nfft/2))' * fs / nfft;
+highFrequencyBins = frequency >= cutoffHz & frequency <= fs/2;
+for index = 1:numel(starts)
+    first = starts(index); last = first + windowSamples - 1;
+    if nnz(finite(first:last)) < 0.8 * windowSamples
+        continue;
+    end
+    segment = filled(first:last);
+    segment = segment - mean(segment);
+    spectrum = fft(segment, nfft);
+    oneSidedPower = abs(spectrum(1:floor(nfft/2)+1)).^2 / max(windowSamples, 1);
+    if rem(nfft, 2) == 0
+        oneSidedPower(2:end-1) = 2 * oneSidedPower(2:end-1);
+    else
+        oneSidedPower(2:end) = 2 * oneSidedPower(2:end);
+    end
+    hfRms(index) = sqrt(sum(oneSidedPower(highFrequencyBins)) / max(windowSamples, 1));
+    d = diff(filled(first:last));
+    derivativeRms(index) = sqrt(mean(d .^ 2));
+    localRange(index) = max(segment) - min(segment);
+    validWindow(index) = true;
+end
+if ~any(validWindow), return; end
+hfValues = hfRms(validWindow);
+dValues = derivativeRms(validWindow);
+rangeValues = localRange(validWindow);
+hfThreshold = strict_threshold(hfValues, get_field(cfg, 'strictHighFrequencyZ', 4));
+dThreshold = strict_threshold(dValues, get_field(cfg, 'strictDerivativeZ', 4));
+rangeThreshold = strict_threshold(rangeValues, get_field(cfg, 'strictRangeZ', 4));
+candidate = validWindow & ((hfRms >= hfThreshold) | ...
+    (derivativeRms >= dThreshold) | (localRange >= rangeThreshold));
+for index = find(candidate(:))'
+    first = starts(index); last = min(numel(x), starts(index) + windowSamples - 1);
+    mask(first:last) = true;
+end
+
+% Join nearby candidate windows so burst trains are represented as one
+% continuous artifact instead of many gaps at zero crossings.
+gapSamples = max(0, round(get_field(cfg, 'strictMergeGapSeconds', 0.2) * fs));
+if gapSamples > 0
+    startsMask = find(diff([false; mask; false]) == 1);
+    endsMask = find(diff([false; mask; false]) == -1) - 1;
+    for index = 1:numel(startsMask)-1
+        if startsMask(index+1) - endsMask(index) - 1 <= gapSamples
+            mask(endsMask(index):startsMask(index+1)) = true;
+        end
+    end
+end
+mask(~finite) = true;
+end
+
+function values = fill_nonfinite(x, finite)
+values = x(finite);
+if isempty(values)
+    values = 0;
+elseif numel(values) == 1
+    values = values(1);
+else
+    index = (1:numel(x))';
+    values = interp1(index(finite), x(finite), index(~finite), 'linear', 'extrap');
+end
+end
+
+function threshold = strict_threshold(values, z)
+center = median(values, 'omitnan');
+scale = robust_scale(values - center);
+% Numerical round-off in a stationary sinusoid can produce a tiny non-zero
+% MAD. Treat it as constant rather than flagging a few arbitrary windows.
+scaleFloor = 1e-6 * max(abs(center), 1);
+if ~(isfinite(scale) && scale > scaleFloor)
+    threshold = center + max(0.5 * abs(center), eps);
+else
+    threshold = center + z * scale;
 end
 end
 

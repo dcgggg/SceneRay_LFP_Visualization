@@ -56,6 +56,22 @@ verifyFalse(testCase, any(result.events.artifactType == "line_noise"));
 verifyLessThan(testCase, nnz(result.channelMask), 0.1*numel(t));
 end
 
+function testStrictModeMarksSustainedHighFrequencyBurst(testCase)
+ensure_src_on_path(testCase);
+fs = 1000;
+t = (0:4999)' / fs;
+x = 0.5 * sin(2*pi*10*t);
+x(1801:2400) = x(1801:2400) + 5*sin(2*pi*250*t(1801:2400));
+data = fixture_data(x, fs);
+cfg = lfpDefaultConfig();
+cfg.artifact.method = "native";
+cfg.artifact.paddingSeconds = 0;
+[~, result] = detectAndHandleArtifacts(data, cfg.artifact);
+strictRows = result.events.artifactType == "strict_burst";
+verifyTrue(testCase, any(strictRows));
+verifyGreaterThan(testCase, nnz(result.channelMask(1801:2400)), 0.8*600);
+end
+
 function data = fixture_data(signal, fs)
 data = struct('signal', signal, 'fs', fs, 'time', (0:size(signal,1)-1)'/fs, ...
     'channelLabels', "ch1", 'units', "uV", 'metadata', struct(), ...

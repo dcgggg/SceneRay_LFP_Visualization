@@ -19,7 +19,15 @@ cfg.artifact.flatlineToleranceUV = 1e-6;
 cfg.artifact.saturationAbsoluteThresholdUV = 5000;
 cfg.artifact.saturationRunLength = 5;
 cfg.artifact.highFrequencyWindowSeconds = 0.250;
-cfg.artifact.highFrequencyZ = 8;
+cfg.artifact.highFrequencyZ = 6;
+cfg.artifact.strictMode = true;
+cfg.artifact.strictWindowSeconds = 0.100;
+cfg.artifact.strictStepSeconds = 0.050;
+cfg.artifact.strictHighpassHz = 100;
+cfg.artifact.strictHighFrequencyZ = 4;
+cfg.artifact.strictDerivativeZ = 4;
+cfg.artifact.strictRangeZ = 4;
+cfg.artifact.strictMergeGapSeconds = 0.200;
 cfg.artifact.lineFrequencyHz = 40;
 cfg.artifact.lineHarmonics = true;
 cfg.artifact.lineNoiseDetection = false;
@@ -94,6 +102,10 @@ metadata(end+1) = item("artifact.paddingSeconds", cfg.artifact.paddingSeconds, "
     "Padding applied around detected artifact samples.", "Artifact");
 metadata(end+1) = item("artifact.lineNoiseDetection", cfg.artifact.lineNoiseDetection, "logical", "", [0 1], [], ...
     "Time-domain 40-Hz rejection; disabled by default so line noise can be interpolated only during fitting.", "Artifact");
+metadata(end+1) = item("artifact.strictMode", cfg.artifact.strictMode, "logical", "", [0 1], [], ...
+    "Short-window high-frequency/burst detector; marks complete abnormal windows and joins short gaps.", "Artifact");
+metadata(end+1) = item("artifact.strictHighpassHz", cfg.artifact.strictHighpassHz, "double", "Hz", [0 Inf], [], ...
+    "Approximate high-pass boundary for the strict detector; keep above retained LFP/line-noise frequencies.", "Artifact");
 metadata(end+1) = item("artifact.amplitudeZ", cfg.artifact.amplitudeZ, "double", "z", [0 Inf], [], ...
     "Robust amplitude threshold for the native backend.", "Artifact");
 metadata(end+1) = item("artifact.derivativeZ", cfg.artifact.derivativeZ, "double", "z", [0 Inf], [], ...
