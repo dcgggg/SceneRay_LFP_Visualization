@@ -26,7 +26,7 @@ end
 if numel(fooofCfg.frequencyRange) ~= 2 || fooofCfg.frequencyRange(2) <= fooofCfg.frequencyRange(1)
     error('LFP:InvalidFitRange', 'fooofCfg.frequencyRange must be increasing.');
 end
-if isvector(power)
+if isvector(power) && numel(power) == numel(freq)
     power = power(:);
 elseif size(power, 1) ~= numel(freq) && size(power, 2) == numel(freq)
     % Accept channels-by-frequency input and normalize to frequency-by-channel.

@@ -27,7 +27,11 @@ verifyTrue(testCase, isgraphics(h3.figure));
 verifyTrue(testCase, isgraphics(h4.figure));
 verifyTrue(testCase, isgraphics(h5.figure));
 verifyEqual(testCase, hParent.figure, parent);
-close([h1.figure h2.figure h3.figure h4.figure h5.figure parent]);
+failedModel = parameterizePowerSpectrum((1:40)', NaN(40,1), cfg.fooof);
+hFailed = plotSpectralModel(failedModel, cfg.plot);
+verifyEqual(testCase, failedModel.fitStatus, "insufficient_data");
+verifyTrue(testCase, isgraphics(hFailed.figure));
+close([h1.figure h2.figure h3.figure h4.figure h5.figure parent hFailed.figure]);
 end
 
 function cfg = set_native(cfg)

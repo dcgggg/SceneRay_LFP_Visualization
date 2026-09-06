@@ -24,4 +24,6 @@ CSV -> importer -> validated data model -> derived preprocessing
     -> bands/figures/tables/log -> export
 ```
 
+`analyzeLfpFolder` 在文件层面复用同一条流水线：扫描 `*.csv`，逐文件导入并识别 `Channel` 区块，随后一次性完成伪影、PSD、参数化和频段功率。结果按文件保存，通道始终以 samples × channels 矩阵和 `channelLabels` 传播，避免重复计算或跨文件混合通道。
+
 The raw signal remains in the data model and is never overwritten by a derived signal.

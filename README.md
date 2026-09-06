@@ -44,6 +44,25 @@ plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot
 files = lfp_export_results(cleanData, "results");
 ```
 
+## 批量处理文件夹
+
+如果需要一次处理文件夹中的所有 CSV，可以只调用一次批处理入口。每个文件内部的多个 `Channel` 区块会自动变成独立通道列，后续 PSD、参数化和频段功率均按通道分别计算：
+
+```matlab
+inputFolder = "C:\Users\PC\Desktop\test";
+cfg = lfpDefaultConfig();
+batch = analyzeLfpFolder(inputFolder, cfg, ...
+    OutputFolder="results", MakeFigures=true, ExportResults=true);
+
+for k = 1:batch.fileCount
+    fprintf('%s | IPG SN %s | %d channels | %s\n', ...
+        batch.files(k).fileName, batch.files(k).ipgSN, ...
+        batch.files(k).channelCount, batch.files(k).status);
+end
+```
+
+结果中的 `channelLabels`、`channelNames`、`channelCount` 和 `ipgSN` 会保留到每个文件的结果结构与图标题中。批处理只对每个文件执行一次导入、伪影、PSD、参数化和频段功率计算；绘图和导出是可选步骤。
+
 40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 默认调用拟合副本上的 log-log 插值（可由 `cfg.fooof.interpolateLineNoise` 关闭），并在 `modelResult.lineNoise` / `modelResult.fittingPower` 中记录结果，`modelResult.inputPower` 始终是原始 PSD。`cfg.psd.frequencyRange` 和 `cfg.fooof.frequencyRange` 默认均为 `[1 40]`，超出 PSD 范围的频带返回 NaN，而不是虚假功率。当前不执行时频分析、PAC 或功能连接。
 
 绘图函数支持 `cfg.plot.parent` 指定 Figure、uipanel 或 uitab；所有分析函数仍可在无 GUI 的 MATLAB 脚本中独立调用。`computeLfpPsd` 和 `computeBandPower` 也会返回带有 `processingHistory` 的结果结构，便于未来 GUI 或批处理保存审计轨迹。

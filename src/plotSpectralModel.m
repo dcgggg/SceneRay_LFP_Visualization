@@ -29,11 +29,15 @@ handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(2,1)
     'peakLines', gobjects(0));
 freq = modelResult.freq;
 valid = freq > 0 & isfinite(modelResult.inputPower) & modelResult.inputPower > 0;
+fullModel = get_curve(modelResult, 'fullModelFit', numel(freq));
+aperiodic = get_curve(modelResult, 'aperiodicFit', numel(freq));
+periodic = get_curve(modelResult, 'periodicFit', numel(freq));
 handles.axes(1) = nexttile(layout);
 plotFrequency(handles.axes(1), freq(valid), log10(modelResult.inputPower(valid)), plotCfg, 'k', 'Original PSD'); hold(handles.axes(1), 'on');
-plotFrequency(handles.axes(1), freq, log10(max(modelResult.fullModelFit, realmin)), plotCfg, 'r', 'Full model');
-plotFrequency(handles.axes(1), freq, log10(max(modelResult.aperiodicFit, realmin)), plotCfg, 'b--', 'Aperiodic fit');
-plotFrequency(handles.axes(1), freq, log10(max(modelResult.aperiodicFit + modelResult.periodicFit, realmin)), plotCfg, 'g:', 'Periodic-inclusive model');
+if any(isfinite(fullModel)), plotFrequency(handles.axes(1), freq, log10(max(fullModel, realmin)), plotCfg, 'r', 'Full model'); end
+if any(isfinite(aperiodic)), plotFrequency(handles.axes(1), freq, log10(max(aperiodic, realmin)), plotCfg, 'b--', 'Aperiodic fit'); end
+periodicInclusive = aperiodic + periodic;
+if any(isfinite(periodicInclusive)), plotFrequency(handles.axes(1), freq, log10(max(periodicInclusive, realmin)), plotCfg, 'g:', 'Periodic-inclusive model'); end
 xline(handles.axes(1), modelResult.fitRange, ':', 'Color', [0.4 0.4 0.4]);
 if isfield(modelResult, 'peakParams') && ~isempty(modelResult.peakParams)
     centers = [modelResult.peakParams.CF];
@@ -44,16 +48,21 @@ if isfield(modelResult, 'peakParams') && ~isempty(modelResult.peakParams)
     end
 end
 hold(handles.axes(1), 'off'); xlabel(handles.axes(1), 'Frequency (Hz)'); ylabel(handles.axes(1), 'log10(power)');
-title(handles.axes(1), sprintf('Fixed model: offset %.3f, exponent %.3f, R^2 %.3f, error %.3f', ...
-    modelResult.aperiodicParams.offset, modelResult.aperiodicParams.exponent, modelResult.rSquared, modelResult.fitError));
+title(handles.axes(1), sprintf('Fixed model [%s]: offset %.3f, exponent %.3f, R^2 %.3f, error %.3f', ...
+    get_field(modelResult, 'fitStatus', "unknown"), modelResult.aperiodicParams.offset, ...
+    modelResult.aperiodicParams.exponent, modelResult.rSquared, modelResult.fitError));
 legend(handles.axes(1), 'Location', 'best'); grid(handles.axes(1), 'on');
 
 handles.axes(2) = nexttile(layout);
-if isfield(modelResult, 'flattenedSpectrum')
-    plotFrequency(handles.axes(2), freq(valid), modelResult.flattenedSpectrum(valid), plotCfg, 'k', 'Flattened spectrum'); hold(handles.axes(2), 'on');
+flattened = get_curve(modelResult, 'flattenedSpectrum', numel(freq));
+if any(isfinite(flattened))
+    plotFrequency(handles.axes(2), freq, flattened, plotCfg, 'k', 'Flattened spectrum'); hold(handles.axes(2), 'on');
 end
-gaussianLog = log10(max(modelResult.fullModelFit, realmin)) - log10(max(modelResult.aperiodicFit, realmin));
-plotFrequency(handles.axes(2), freq, gaussianLog, plotCfg, 'g', 'Gaussian periodic sum'); hold(handles.axes(2), 'off');
+if any(isfinite(fullModel)) && any(isfinite(aperiodic))
+    gaussianLog = log10(max(fullModel, realmin)) - log10(max(aperiodic, realmin));
+    plotFrequency(handles.axes(2), freq, gaussianLog, plotCfg, 'g', 'Gaussian periodic sum');
+end
+hold(handles.axes(2), 'off');
 xlabel(handles.axes(2), 'Frequency (Hz)'); ylabel(handles.axes(2), 'log10 residual');
 title(handles.axes(2), sprintf('Periodic decomposition (%d peaks)', modelResult.nPeaks)); grid(handles.axes(2), 'on');
 end
@@ -74,4 +83,16 @@ if isgraphics(handleValue)
 else
     value = "";
 end
+end
+
+function curve = get_curve(modelResult, fieldName, nPoints)
+curve = NaN(nPoints, 1);
+if ~isfield(modelResult, fieldName) || isempty(modelResult.(fieldName))
+    return;
+end
+values = modelResult.(fieldName);
+if numel(values) ~= nPoints
+    error('LFP:InvalidModelResult', '%s has %d elements; expected %d.', fieldName, numel(values), nPoints);
+end
+curve(:) = values(:);
 end
