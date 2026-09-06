@@ -44,7 +44,9 @@ plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot
 files = lfp_export_results(cleanData, "results");
 ```
 
-40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；插值只作用于拟合副本。`cfg.psd.frequencyRange` 和 `cfg.fooof.frequencyRange` 默认均为 `[1 40]`，超出 PSD 范围的频带返回 NaN，而不是虚假功率。当前不执行时频分析、PAC 或功能连接。
+40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 默认调用拟合副本上的 log-log 插值（可由 `cfg.fooof.interpolateLineNoise` 关闭），并在 `modelResult.lineNoise` / `modelResult.fittingPower` 中记录结果，`modelResult.inputPower` 始终是原始 PSD。`cfg.psd.frequencyRange` 和 `cfg.fooof.frequencyRange` 默认均为 `[1 40]`，超出 PSD 范围的频带返回 NaN，而不是虚假功率。当前不执行时频分析、PAC 或功能连接。
+
+绘图函数支持 `cfg.plot.parent` 指定 Figure、uipanel 或 uitab；所有分析函数仍可在无 GUI 的 MATLAB 脚本中独立调用。`computeLfpPsd` 和 `computeBandPower` 也会返回带有 `processingHistory` 的结果结构，便于未来 GUI 或批处理保存审计轨迹。
 
 ## 初始化测试
 

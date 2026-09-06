@@ -23,8 +23,20 @@ for channel = 1:numel(channels)
     end
 end
 visible = char(get_field(plotCfg, 'visible', "on"));
-figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'Band-power artifact comparison');
-layout = tiledlayout(1, 2, 'TileSpacing', 'compact');
+parent = get_field(plotCfg, 'parent', []);
+if isempty(parent)
+    figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'Band-power artifact comparison');
+    layout = tiledlayout(figureHandle, 1, 2, 'TileSpacing', 'compact');
+else
+    parentType = get_graphics_type(parent);
+    if any(parentType == ["figure" "uipanel" "uitab"])
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(parent, 1, 2, 'TileSpacing', 'compact');
+    else
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(figureHandle, 1, 2, 'TileSpacing', 'compact');
+    end
+end
 handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(1,2));
 handles.axes(1) = nexttile(layout); bar(handles.axes(1), categorical(names), valuesBefore'); title(handles.axes(1), 'Before exclusion'); ylabel(handles.axes(1), 'Total power'); grid(handles.axes(1), 'on');
 handles.axes(2) = nexttile(layout); bar(handles.axes(2), categorical(names), valuesAfter'); title(handles.axes(2), 'After exclusion'); ylabel(handles.axes(2), 'Total power'); grid(handles.axes(2), 'on');
@@ -32,4 +44,12 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function value = get_graphics_type(handleValue)
+if isgraphics(handleValue)
+    value = string(get(handleValue, 'Type'));
+else
+    value = "";
+end
 end

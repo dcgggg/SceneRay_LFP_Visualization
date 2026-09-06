@@ -11,8 +11,20 @@ if ~isfield(modelResult, 'freq') || ~isfield(modelResult, 'inputPower')
     error('LFP:InvalidModelResult', 'modelResult.freq and modelResult.inputPower are required.');
 end
 visible = char(get_field(plotCfg, 'visible', "on"));
-figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'Spectral model');
-layout = tiledlayout(figureHandle, 2, 1, 'TileSpacing', 'compact');
+parent = get_field(plotCfg, 'parent', []);
+if isempty(parent)
+    figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'Spectral model');
+    layout = tiledlayout(figureHandle, 2, 1, 'TileSpacing', 'compact');
+else
+    parentType = get_graphics_type(parent);
+    if any(parentType == ["figure" "uipanel" "uitab"])
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(parent, 2, 1, 'TileSpacing', 'compact');
+    else
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(figureHandle, 2, 1, 'TileSpacing', 'compact');
+    end
+end
 handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(2,1), ...
     'peakLines', gobjects(0));
 freq = modelResult.freq;
@@ -54,4 +66,12 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function value = get_graphics_type(handleValue)
+if isgraphics(handleValue)
+    value = string(get(handleValue, 'Type'));
+else
+    value = "";
+end
 end

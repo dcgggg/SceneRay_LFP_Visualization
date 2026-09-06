@@ -18,12 +18,16 @@ h2 = plotSpectralModel(model, cfg.plot);
 h3 = plotAnalysisSummary(artifacts, psdData.spectrum, model, bandData.bandPower, cfg.plot);
 h4 = plotPsdComparison(psdData.spectrum, psdData.spectrum, cfg.plot);
 h5 = plotBandPowerComparison(bandData.bandPower, bandData.bandPower, cfg.plot);
+parent = figure('Visible', 'off');
+cfgParent = cfg.plot; cfgParent.parent = parent;
+hParent = plotSpectralModel(model, cfgParent);
 verifyTrue(testCase, isgraphics(h1.figure));
 verifyTrue(testCase, isgraphics(h2.figure));
 verifyTrue(testCase, isgraphics(h3.figure));
 verifyTrue(testCase, isgraphics(h4.figure));
 verifyTrue(testCase, isgraphics(h5.figure));
-close([h1.figure h2.figure h3.figure h4.figure h5.figure]);
+verifyEqual(testCase, hParent.figure, parent);
+close([h1.figure h2.figure h3.figure h4.figure h5.figure parent]);
 end
 
 function cfg = set_native(cfg)

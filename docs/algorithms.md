@@ -16,7 +16,7 @@ PSD units are signal-unit-squared per Hz. PSD is computed from clean windows onl
 
 ## Aperiodic and periodic components
 
-The native model is fixed/no-knee: `L(F)=offset-exponent*log10(F)`, so exponent is the negative log-log slope and no knee is fitted. The implementation performs robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. 40-Hz harmonics remain in the original PSD and are only interpolated in a fitting copy.
+The native model is fixed/no-knee: `L(F)=offset-exponent*log10(F)`, so exponent is the negative log-log slope and no knee is fitted. The implementation performs robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. 40-Hz harmonics remain in the original PSD and are interpolated only in a fitting copy before the robust fit; `modelResult.inputPower` is raw and `modelResult.fittingPower` is the interpolated copy. Set `cfg.fooof.interpolateLineNoise=false` to disable this step.
 
 `lfp_interpolate_line_noise` reproduces the documented `fooof.utils.interpolate_spectrum` behavior: each closed range uses averaged buffer samples on both sides and linear interpolation in log-log spacing. With the defaults, ranges are 38–42, 78–82, and so on up to Nyquist. The original `spectrum.psd` is never replaced.
 
@@ -31,6 +31,8 @@ Implemented functions:
 - `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
 - `detectAndHandleArtifacts`, `computeLfpPsd`, `parameterizePowerSpectrum`, `computeBandPower`: stable cfg-based entry points for future GUI use.
 - `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`, `plotAnalysisSummary`: independent before/after and model-result plots.
+
+Plot functions return figure/layout/axes handles and accept an optional `plotCfg.parent` Figure, panel, or tab. Artifact comparison includes raw versus finite masked amplitude distributions, per-channel artifact fractions, and event-count/total-duration summaries by artifact type.
 
 ## Testing
 

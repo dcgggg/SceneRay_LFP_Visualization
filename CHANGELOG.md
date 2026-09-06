@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added unified configuration, FieldTrip/native artifact API, strict artifact-aware PSD metadata, fixed/no-knee Gaussian spectral parameterization, cfg-compatible entry points, and before/after/model summary plots.
+- Parameterization now performs configurable 40-Hz harmonic interpolation on a fitting-only PSD copy and preserves raw/fitting spectra separately. Artifact comparison plots now include before/after amplitude distributions, channel fractions, event counts, and durations; plotting and cfg-compatible entry points expose parent/history handles for future GUI integration.
 
 - Added non-destructive robust artifact marking, manual Welch PSD, FOOOF-compatible fitting-only line-noise interpolation, fixed aperiodic/periodic parameterization, configurable band-power integration, artifact-aware manual STFT, overview plotting, and MAT/CSV/log/PNG export.
 

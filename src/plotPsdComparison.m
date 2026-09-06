@@ -15,8 +15,20 @@ end
 channels = get_field(plotCfg, 'channelIndex', 1:min(size(beforePsd.psd,2), size(afterPsd.psd,2)));
 if isempty(channels), channels = 1:min(size(beforePsd.psd,2), size(afterPsd.psd,2)); end
 visible = char(get_field(plotCfg, 'visible', "on"));
-figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'PSD artifact comparison');
-layout = tiledlayout(figureHandle, numel(channels), 1, 'TileSpacing', 'compact');
+parent = get_field(plotCfg, 'parent', []);
+if isempty(parent)
+    figureHandle = figure('Visible', visible, 'Color', 'w', 'Name', 'PSD artifact comparison');
+    layout = tiledlayout(figureHandle, numel(channels), 1, 'TileSpacing', 'compact');
+else
+    parentType = get_graphics_type(parent);
+    if any(parentType == ["figure" "uipanel" "uitab"])
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(parent, numel(channels), 1, 'TileSpacing', 'compact');
+    else
+        figureHandle = ancestor(parent, 'figure');
+        layout = tiledlayout(figureHandle, numel(channels), 1, 'TileSpacing', 'compact');
+    end
+end
 handles = struct('figure', figureHandle, 'layout', layout, 'axes', gobjects(numel(channels),1));
 for index = 1:numel(channels)
     channel = channels(index);
@@ -30,4 +42,12 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function value = get_graphics_type(handleValue)
+if isgraphics(handleValue)
+    value = string(get(handleValue, 'Type'));
+else
+    value = "";
+end
 end
