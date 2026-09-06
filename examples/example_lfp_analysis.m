@@ -7,12 +7,17 @@ inputFile = "path/to/recording.csv";
 outputFolder = "results";
 
 data = lfp_import_scenray_csv(inputFile, SamplingRateHz=1000, Units="uV");
-data = lfp_preprocess(data, ReplaceArtifacts=false);
-data = lfp_compute_psd(data, WindowSeconds=4, OverlapFraction=0.5);
-data = lfp_prepare_spectrum_for_fitting(data, LineFrequencyHz=40, ...
-    InterpolationHalfWidthHz=2, BufferSamples=3);
-data = lfp_fit_spectral_parameters(data, FitRangeHz=[3 150]);
-data = lfp_compute_band_power(data);
-lfp_plot_results(data);
-files = lfp_export_results(data, outputFolder);
+cfg = lfpDefaultConfig();
+[cleanData, artifactResult] = detectAndHandleArtifacts(data, cfg.artifact);
+psdResult = computeLfpPsd(cleanData, artifactResult, cfg.psd);
+modelResult = parameterizePowerSpectrum(psdResult.frequencyHz, psdResult.psd, cfg.fooof);
+bandResult = computeBandPower(psdResult, modelResult, cfg.bands);
+cleanData.spectrum = psdResult;
+cleanData.spectralParameters = struct('aperiodicPsd', horzcat(modelResult.aperiodicFit), ...
+    'periodicPowerAboveAperiodic', horzcat(modelResult.periodicFit));
+cleanData.bandPower = bandResult;
+plotArtifactComparison(data, cleanData, artifactResult, cfg.plot);
+plotSpectralModel(modelResult(1), cfg.plot);
+plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot);
+files = lfp_export_results(cleanData, outputFolder);
 disp(files);

@@ -1,6 +1,6 @@
 # Algorithms
 
-This document records planned definitions before implementation.
+This document records the implemented MATLAB definitions and their limits.
 
 ## Interference
 
@@ -8,15 +8,15 @@ The current project assumption is 40 Hz device/line interference and integer har
 
 ## Artifact policy
 
-Artifacts are first represented as intervals and channel masks. Detection candidates will include high amplitude, abrupt steps, saturation/rail hits, and abnormal local variance. A detected interval is not proof of head motion without an external motion reference or manual review.
+Artifacts are represented as sample masks, channel masks and an events table. The default FieldTrip backend uses `ft_artifact_zvalue` when available; native checks complement it for high amplitude, jump/spike, flatline, saturation, high-frequency burst, strong 40-Hz projection, bad channels and manual intervals. The native backend is available without FieldTrip. Detection is not proof of head motion or any physiological source. Default handling is mask-based exclusion; reconstruction is not silently performed.
 
 ## PSD and bands
 
-PSD units are signal-unit-squared per Hz. Band power is the integral of the selected PSD over a documented frequency interval. Total, relative, aperiodic, and periodic-above-aperiodic quantities are stored separately.
+PSD units are signal-unit-squared per Hz. PSD is computed from clean windows only, with per-window PSD and per-frequency valid-window counts saved. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total, relative, log, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
 
 ## Aperiodic and periodic components
 
-The current MATLAB-native implementation supports a fixed log-log aperiodic model and reports offset, exponent, residual/error, and fit quality separately from periodic peaks. Knee fitting is intentionally a separate future mode. FieldTrip or native MATLAB implementations may be used, but the project will not call Python FOOOF at runtime. The 40 Hz harmonic bins remain in the PSD and are interpolated only in the spectrum supplied to the parameterization step.
+The native model is fixed/no-knee: `L(F)=offset-exponent*log10(F)`, so exponent is the negative log-log slope and no knee is fitted. The implementation performs robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. 40-Hz harmonics remain in the original PSD and are only interpolated in a fitting copy.
 
 `lfp_interpolate_line_noise` reproduces the documented `fooof.utils.interpolate_spectrum` behavior: each closed range uses averaged buffer samples on both sides and linear interpolation in log-log spacing. With the defaults, ranges are 38–42, 78–82, and so on up to Nyquist. The original `spectrum.psd` is never replaced.
 
@@ -29,6 +29,8 @@ Implemented functions:
 - `lfp_compute_band_power`: total, relative, aperiodic and periodic-above-aperiodic integrations.
 - `lfp_compute_time_frequency`: artifact-aware manual STFT.
 - `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
+- `detectAndHandleArtifacts`, `computeLfpPsd`, `parameterizePowerSpectrum`, `computeBandPower`: stable cfg-based entry points for future GUI use.
+- `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`, `plotAnalysisSummary`: independent before/after and model-result plots.
 
 ## Testing
 

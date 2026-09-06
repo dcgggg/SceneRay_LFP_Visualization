@@ -19,7 +19,10 @@ data.units              % signal unit, e.g. "uV"
 data.metadata           % source/device/channel metadata
 data.artifacts          % interval and channel-level annotations
 data.processingHistory  % ordered struct array of operations and parameters
+data.cleanedSignal      % optional NaN-marked analysis/display copy
 ```
+
+`detectAndHandleArtifacts` returns `artifactResult.sampleMask`, `channelMask`, `globalMask`, `events`, `badChannels`, `method`, `parameters`, `summary`, `retainedDuration`, `rejectedDuration`, `rejectedPercentage`, `warnings`, and `processingHistory`. `events` contains artifact type, sample/time bounds, channel, score, threshold and method. Original `data.signal` remains unchanged; mask-based exclusion is distinct from reconstruction.
 
 For multi-block files, `data.metadata.channelRows`, `blockStarts`, `blockEnds`, and `headerRows` preserve the row-level parsing decisions for auditability. `data.metadata.blocks` stores metadata for each channel independently.
 

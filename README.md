@@ -20,7 +20,7 @@
 
 ## 当前状态
 
-当前已完成 SceneRay CSV 导入、非破坏性伪影标记、artifact-aware Welch PSD、40 Hz 谐波拟合前插值、fixed 1/f 参数化、频带功率、结果绘图和导出。导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；当前约定为 1 kHz、μV。伪影只写入掩码和处理副本，不覆盖原始信号。
+当前已完成 SceneRay CSV 导入、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch PSD、40 Hz 谐波拟合前插值、fixed/no-knee 1/f 参数化、Gaussian 周期峰、频带功率、伪影/PSD/频带/模型对照图和结果导出。导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；当前约定为 1 kHz、μV。伪影只写入掩码和处理副本，不覆盖原始信号。
 
 `fooof_mat` 是 MATLAB 对 Python FOOOF 的封装，需要 Python 运行环境，因此不纳入本项目的核心依赖。FieldTrip/原生 MATLAB 路径将保持纯 MATLAB 运行。
 
@@ -29,18 +29,22 @@
 ```matlab
 addpath('src');
 data = lfp_import_scenray_csv("my_recording.csv");
-data = lfp_preprocess(data, ReplaceArtifacts=false);
-data = lfp_compute_psd(data, WindowSeconds=4, OverlapFraction=0.5);
-data = lfp_prepare_spectrum_for_fitting(data, LineFrequencyHz=40, ...
-    InterpolationHalfWidthHz=2, BufferSamples=3);
-data = lfp_fit_spectral_parameters(data, FitRangeHz=[3 150]);
-data = lfp_compute_band_power(data);
-data = lfp_compute_time_frequency(data, WindowSeconds=1, StepSeconds=0.25);
-lfp_plot_results(data);
-files = lfp_export_results(data, "results");
+cfg = lfpDefaultConfig();
+[cleanData, artifactResult] = detectAndHandleArtifacts(data, cfg.artifact);
+psdResult = computeLfpPsd(cleanData, artifactResult, cfg.psd);
+modelResult = parameterizePowerSpectrum(psdResult.frequencyHz, psdResult.psd, cfg.fooof);
+bandResult = computeBandPower(psdResult, modelResult, cfg.bands);
+cleanData.spectrum = psdResult;
+cleanData.spectralParameters = struct('aperiodicPsd', horzcat(modelResult.aperiodicFit), ...
+    'periodicPowerAboveAperiodic', horzcat(modelResult.periodicFit));
+cleanData.bandPower = bandResult;
+plotArtifactComparison(data, cleanData, artifactResult, cfg.plot);
+plotSpectralModel(modelResult(1), cfg.plot);
+plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot);
+files = lfp_export_results(cleanData, "results");
 ```
 
-40 Hz 及其 Nyquist 以下谐波保留在原始时域和 `spectrum.psd` 中；`lfp_prepare_spectrum_for_fitting` 仅生成 `spectrum.psdForFitting`，按照 FOOOF 的 line-noise 插值思路在 log-log 空间插值，供参数化使用。`lfp_compute_time_frequency` 提供基础 MATLAB STFT，并对伪影过多的时间窗返回 NaN。
+40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；插值只作用于拟合副本。`cfg.psd.frequencyRange` 和 `cfg.fooof.frequencyRange` 默认均为 `[1 40]`，超出 PSD 范围的频带返回 NaN，而不是虚假功率。当前不执行时频分析、PAC 或功能连接。
 
 ## 初始化测试
 
