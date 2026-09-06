@@ -34,6 +34,17 @@ verifyEqual(testCase, result.fitStatus, "ok");
 verifyTrue(testCase, isfinite(result.aperiodicParams.offset));
 end
 
+function testAcceptsChannelByFrequencyInput(testCase)
+ensure_src_on_path(testCase);
+cfg = lfpDefaultConfig();
+freq = (1:40)';
+power = [10 .^ (1 - log10(freq)), 10 .^ (0.5 - 0.7*log10(freq))].';
+result = parameterizePowerSpectrum(freq, power, cfg.fooof);
+verifyEqual(testCase, numel(result), 2);
+verifyEqual(testCase, numel(result(1).aperiodicFit), numel(freq));
+verifyEqual(testCase, numel(result(2).aperiodicFit), numel(freq));
+end
+
 function testInterpolatesLineNoiseOnlyInFittingCopy(testCase)
 ensure_src_on_path(testCase);
 cfg = lfpDefaultConfig();

@@ -26,9 +26,16 @@ end
 if numel(fooofCfg.frequencyRange) ~= 2 || fooofCfg.frequencyRange(2) <= fooofCfg.frequencyRange(1)
     error('LFP:InvalidFitRange', 'fooofCfg.frequencyRange must be increasing.');
 end
-if isvector(power), power = power(:); end
+if isvector(power)
+    power = power(:);
+elseif size(power, 1) ~= numel(freq) && size(power, 2) == numel(freq)
+    % Accept channels-by-frequency input and normalize to frequency-by-channel.
+    power = power.';
+end
 if size(power, 1) ~= numel(freq)
-    error('LFP:InvalidSpectrum', 'POWER rows must match FREQ.');
+    error('LFP:InvalidSpectrum', ...
+        'POWER must be frequency-by-channel (or channel-by-frequency); got [%d %d] for %d frequencies.', ...
+        size(power, 1), size(power, 2), numel(freq));
 end
 if any(~isfinite(freq)) || any(diff(freq) <= 0) || any(freq < 0)
     error('LFP:InvalidSpectrum', 'FREQ must be finite, nonnegative and strictly increasing.');

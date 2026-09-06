@@ -48,6 +48,20 @@ verifyTrue(testCase, all(result.table.totalPower(result.table.band ~= "highGamma
 verifyTrue(testCase, all(isnan(result.table.totalPower(result.table.band == "highGamma"))));
 end
 
+function testNormalizesPerChannelModelVectors(testCase)
+ensure_src_on_path(testCase);
+frequencyHz = (1:40)';
+psd = ones(40, 2);
+psdResult = struct('frequencyHz', frequencyHz, 'psd', psd, 'units', "uV", ...
+    'fs', 1000, 'channelLabels', ["5-6", "7-8"]);
+model(1) = struct('aperiodicFit', 0.5*ones(1,40), 'periodicFit', 0.5*ones(1,40));
+model(2) = struct('aperiodicFit', 0.25*ones(40,1), 'periodicFit', 0.75*ones(40,1));
+cfg = lfpDefaultConfig();
+result = computeBandPower(psdResult, model, cfg.bands);
+verifyEqual(testCase, unique(result.table.channelLabel, 'stable'), ["5-6"; "7-8"]);
+verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(result.table.band ~= "highGamma"))));
+end
+
 function data = base_data(frequencyHz, psd)
 nSamples = 100;
 data = struct('signal', zeros(nSamples, size(psd, 2)), 'fs', 1000, 'units', "uV", ...

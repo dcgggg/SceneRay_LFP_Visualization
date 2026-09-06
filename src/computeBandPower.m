@@ -26,11 +26,10 @@ data = struct('signal', zeros(1, nChannels), 'fs', get_field(psdResult, 'fs', 10
     'spectrum', psdResult, 'processingHistory', struct( ...
     'operation', "psd", 'parameters', struct(), 'notes', "compatibility entry point"));
 if ~isempty(modelResult)
-    if numel(modelResult) ~= nChannels
-        error('LFP:InvalidModelResult', 'modelResult count must match PSD channels.');
-    end
-    data.spectralParameters = struct('aperiodicPsd', horzcat(modelResult.aperiodicFit), ...
-        'periodicPowerAboveAperiodic', horzcat(modelResult.periodicFit));
+    aperiodicPsd = collect_model_spectrum(modelResult, 'aperiodicFit', size(psdResult.psd, 1), nChannels);
+    periodicPsd = collect_model_spectrum(modelResult, 'periodicFit', size(psdResult.psd, 1), nChannels);
+    data.spectralParameters = struct('aperiodicPsd', aperiodicPsd, ...
+        'periodicPowerAboveAperiodic', periodicPsd);
 end
 resultData = lfp_compute_band_power(data, Bands=bands);
 bandResult = resultData.bandPower;
@@ -39,4 +38,36 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function matrix = collect_model_spectrum(modelResult, fieldName, nFrequencies, nChannels)
+% Normalize row/column vectors and matrix orientation to frequency-by-channel.
+if isstruct(modelResult) && numel(modelResult) == 1
+    values = modelResult.(fieldName);
+    if isvector(values) && numel(values) == nFrequencies && nChannels == 1
+        matrix = values(:);
+    elseif isequal(size(values), [nFrequencies nChannels])
+        matrix = values;
+    elseif isequal(size(values), [nChannels nFrequencies])
+        matrix = values.';
+    else
+        error('LFP:InvalidModelResult', ...
+            '%s has size [%d %d]; expected [%d %d] or its transpose.', fieldName, ...
+            size(values, 1), size(values, 2), nFrequencies, nChannels);
+    end
+    return;
+end
+if numel(modelResult) ~= nChannels
+    error('LFP:InvalidModelResult', ...
+        'modelResult count (%d) must match PSD channel count (%d).', numel(modelResult), nChannels);
+end
+matrix = NaN(nFrequencies, nChannels);
+for channel = 1:nChannels
+    values = modelResult(channel).(fieldName);
+    if numel(values) ~= nFrequencies
+        error('LFP:InvalidModelResult', ...
+            '%s for channel %d has %d elements; expected %d.', fieldName, channel, numel(values), nFrequencies);
+    end
+    matrix(:, channel) = values(:);
+end
 end
