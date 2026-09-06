@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.6.0] - 2026-09-06
+
 - Added strict native burst marking based on short-window FFT high-frequency energy, derivative energy and local range, with configurable gap joining for sustained interference trains. The default PSD policy now rejects any window containing a marked sample.
 - Revised artifact defaults for LFP: native channel-specific detection is now the default, 40-Hz line noise is retained unless explicitly enabled for time-domain rejection, and PSD windows use a configurable artifact-fraction tolerance. Full-record waveform display is now the default.
 - Enlarged interactive/export figures, added shared plot sizing/resolution settings, and changed artifact comparison to a one-column Raw/Clean panel pair for every channel. Batch analysis can keep MATLAB figure windows open with `KeepFiguresOpen=true`.
