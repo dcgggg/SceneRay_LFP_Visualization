@@ -34,6 +34,19 @@ verifyEqual(testCase, out.bandPower.table.totalPower, 10, 'AbsTol', 1e-12);
 verifyTrue(testCase, isnan(out.bandPower.table.periodicPower));
 end
 
+function testConfigCompatibilityEntryPoint(testCase)
+ensure_src_on_path(testCase);
+cfg = lfpDefaultConfig();
+frequencyHz = (1:40)';
+psd = ones(40, 1);
+psdResult = struct('frequencyHz', frequencyHz, 'psd', psd, 'units', "uV", 'fs', 1000);
+model = struct('aperiodicFit', 0.5*ones(40,1), 'periodicFit', 0.5*ones(40,1));
+result = computeBandPower(psdResult, model, cfg.bands);
+verifyEqual(testCase, result.table.band(1), "delta");
+verifyTrue(testCase, all(result.table.totalPower(result.table.band ~= "highGamma") >= 0));
+verifyTrue(testCase, all(isnan(result.table.totalPower(result.table.band == "highGamma"))));
+end
+
 function data = base_data(frequencyHz, psd)
 nSamples = 100;
 data = struct('signal', zeros(nSamples, size(psd, 2)), 'fs', 1000, 'units', "uV", ...
