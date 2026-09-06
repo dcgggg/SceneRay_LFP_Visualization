@@ -34,6 +34,7 @@ end
 resultData = lfp_compute_band_power(data, Bands=bands);
 bandResult = resultData.bandPower;
 bandResult.processingHistory = resultData.processingHistory;
+bandResult.parameterizationWarnings = collect_fit_warnings(modelResult, nChannels);
 end
 
 function value = get_field(s, name, defaultValue)
@@ -44,6 +45,10 @@ function matrix = collect_model_spectrum(modelResult, fieldName, nFrequencies, n
 % Normalize row/column vectors and matrix orientation to frequency-by-channel.
 if isstruct(modelResult) && numel(modelResult) == 1
     values = modelResult.(fieldName);
+    if isempty(values)
+        matrix = NaN(nFrequencies, nChannels);
+        return;
+    end
     if isvector(values) && numel(values) == nFrequencies && nChannels == 1
         matrix = values(:);
     elseif isequal(size(values), [nFrequencies nChannels])
@@ -64,10 +69,35 @@ end
 matrix = NaN(nFrequencies, nChannels);
 for channel = 1:nChannels
     values = modelResult(channel).(fieldName);
+    if isempty(values)
+        % Preserve a failed fit as missing parameterized power. Total and
+        % relative PSD-derived band powers remain available.
+        continue;
+    end
     if numel(values) ~= nFrequencies
         error('LFP:InvalidModelResult', ...
             '%s for channel %d has %d elements; expected %d.', fieldName, channel, numel(values), nFrequencies);
     end
-    matrix(:, channel) = values(:);
+matrix(:, channel) = values(:);
 end
+end
+
+function warnings = collect_fit_warnings(modelResult, nChannels)
+warnings = strings(0, 1);
+if isempty(modelResult) || ~isstruct(modelResult) || ...
+        (numel(modelResult) == 1 && nChannels > 1)
+    return;
+end
+for channel = 1:min(numel(modelResult), nChannels)
+    status = get_field(modelResult(channel), 'fitStatus', "unknown");
+    if string(status) ~= "ok"
+        warnings(end + 1, 1) = sprintf('Channel %d parameterization status: %s.', ...
+            channel, string(status)); %#ok<AGROW>
+    end
+    fitWarnings = get_field(modelResult(channel), 'warnings', strings(0, 1));
+    if ~isempty(fitWarnings)
+        warnings = [warnings; string(fitWarnings(:))]; %#ok<AGROW>
+    end
+end
+warnings = unique(warnings, 'stable');
 end

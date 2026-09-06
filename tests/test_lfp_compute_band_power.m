@@ -62,6 +62,24 @@ verifyEqual(testCase, unique(result.table.channelLabel, 'stable'), ["5-6"; "7-8"
 verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(result.table.band ~= "highGamma"))));
 end
 
+function testKeepsFailedChannelAsMissingParameterization(testCase)
+ensure_src_on_path(testCase);
+frequencyHz = (1:40)';
+psdResult = struct('frequencyHz', frequencyHz, 'psd', ones(40, 2), ...
+    'units', "uV", 'fs', 1000, 'channelLabels', ["5-6", "7-8"]);
+model(1) = struct('aperiodicFit', [], 'periodicFit', [], ...
+    'fitStatus', "insufficient_data", 'warnings', "No valid PSD points.");
+model(2) = struct('aperiodicFit', 0.5*ones(40,1), 'periodicFit', 0.5*ones(40,1), ...
+    'fitStatus', "ok", 'warnings', strings(0,1));
+cfg = lfpDefaultConfig();
+result = computeBandPower(psdResult, model, cfg.bands);
+firstChannel = result.table.channelIndex == 1;
+secondChannel = result.table.channelIndex == 2;
+verifyTrue(testCase, all(isnan(result.table.aperiodicPower(firstChannel))));
+verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(secondChannel & result.table.band ~= "highGamma"))));
+verifyTrue(testCase, any(contains(result.parameterizationWarnings, "insufficient_data")));
+end
+
 function data = base_data(frequencyHz, psd)
 nSamples = 100;
 data = struct('signal', zeros(nSamples, size(psd, 2)), 'fs', 1000, 'units', "uV", ...
