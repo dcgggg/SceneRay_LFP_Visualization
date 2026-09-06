@@ -16,10 +16,14 @@ bandData = lfp_compute_band_power(psdData);
 h1 = plotArtifactComparison(data, cleanData, artifacts, cfg.plot);
 h2 = plotSpectralModel(model, cfg.plot);
 h3 = plotAnalysisSummary(artifacts, psdData.spectrum, model, bandData.bandPower, cfg.plot);
+h4 = plotPsdComparison(psdData.spectrum, psdData.spectrum, cfg.plot);
+h5 = plotBandPowerComparison(bandData.bandPower, bandData.bandPower, cfg.plot);
 verifyTrue(testCase, isgraphics(h1.figure));
 verifyTrue(testCase, isgraphics(h2.figure));
 verifyTrue(testCase, isgraphics(h3.figure));
-close([h1.figure h2.figure h3.figure]);
+verifyTrue(testCase, isgraphics(h4.figure));
+verifyTrue(testCase, isgraphics(h5.figure));
+close([h1.figure h2.figure h3.figure h4.figure h5.figure]);
 end
 
 function cfg = set_native(cfg)
