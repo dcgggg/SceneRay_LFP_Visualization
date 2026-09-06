@@ -40,6 +40,17 @@ verifyEqual(testCase, out.spectrum.windowCount, 1);
 verifyError(testCase, @() lfp_compute_psd(struct('signal', ones(3,1), 'fs', 1000)), 'LFP:InvalidData');
 end
 
+function testConfigCompatibilityEntryPoint(testCase)
+ensure_src_on_path(testCase);
+cfg = lfpDefaultConfig();
+data = base_data(sin(2*pi*10*(0:1999)'/1000), 1000);
+artifactResult = struct('channelMask', false(size(data.signal)));
+result = computeLfpPsd(data, artifactResult, cfg.psd);
+verifyEqual(testCase, result.frequencyHz(1), 1, 'AbsTol', result.frequencyResolutionHz);
+verifyLessThanOrEqual(testCase, result.frequencyHz(end), 40);
+verifyTrue(testCase, isfield(result, 'windowPsd'));
+end
+
 function data = base_data(signal, fs)
 data = struct('signal', signal, 'fs', fs, 'time', (0:size(signal,1)-1)'/fs, ...
     'channelLabels', "ch1", 'units', "uV", 'metadata', struct(), ...
