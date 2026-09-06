@@ -46,7 +46,7 @@ files = lfp_export_results(cleanData, "results");
 
 默认伪迹处理使用逐通道的 native 检测，并启用严格短窗模式（`cfg.artifact.strictMode = true`）。严格模式按窗口内高于 `strictHighpassHz` 的 FFT 能量、导数能量和局部振幅范围检测持续突发，并将候选窗口之间不超过 `strictMergeGapSeconds` 的短间隙一并标记。原始 `data.signal` 始终保留；伪迹只写入 `artifactResult.channelMask`，显示副本 `cleanData.cleanedSignal` 将对应样本标为 `NaN`，不会自动把前后数据拼接或重建。40 Hz 及其 Nyquist 以下谐波默认不作为时间域伪迹删除，而是在频谱参数化的拟合副本中插值。若明确需要 FieldTrip，可设置 `cfg.artifact.method = "fieldtrip"`，但其时间区间会应用到所有通道。
 
-PSD 默认允许每个窗口最多 5% 的无效/伪迹样本（`cfg.psd.maxArtifactFraction = 0.05`）；超过阈值的窗口排除，低于阈值的样本只在该 PSD 窗口内线性填补，并记录到 `filledSampleCount`。将阈值设为 `0` 可恢复严格的窗口排除模式。
+PSD 默认严格排除包含任意无效/伪迹样本的窗口（`cfg.psd.maxArtifactFraction = 0`），因此被标记的红色区间不会进入默认 PSD、参数化或频段功率分析。若明确需要允许少量污染，可将阈值改为正数（例如 `0.05`）；此时低于阈值的样本只在该 PSD 窗口内线性填补，并记录到 `filledSampleCount`。
 
 ## 批量处理文件夹
 

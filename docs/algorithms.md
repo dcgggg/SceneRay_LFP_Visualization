@@ -12,7 +12,7 @@ Artifacts are represented as sample masks, channel masks and an events table. Th
 
 ## PSD and bands
 
-PSD units are signal-unit-squared per Hz. PSD is computed from artifact-aware windows, with per-window PSD and per-frequency valid-window counts saved. `cfg.psd.maxArtifactFraction` controls the tolerated invalid/artifact fraction: the default 0.05 rejects heavily contaminated windows and linearly fills only the small accepted fraction; setting it to 0 rejects any window containing an invalid sample. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
+PSD units are signal-unit-squared per Hz. PSD is computed from artifact-aware windows, with per-window PSD and per-frequency valid-window counts saved. `cfg.psd.maxArtifactFraction` controls the tolerated invalid/artifact fraction; the default 0 rejects any window containing an invalid sample, so marked intervals do not enter the default spectral analysis. A positive value explicitly permits a small contaminated fraction and linearly fills only that accepted fraction, recorded in `filledSampleCount`. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
 
 ## Aperiodic and periodic components
 

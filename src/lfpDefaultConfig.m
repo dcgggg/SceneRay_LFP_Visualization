@@ -44,7 +44,7 @@ cfg.psd.nfft = 0;
 cfg.psd.taper = "hann";
 cfg.psd.frequencyRange = [1 40];
 cfg.psd.excludeArtifacts = true;
-cfg.psd.maxArtifactFraction = 0.05;
+cfg.psd.maxArtifactFraction = 0;
 cfg.psd.aggregationMethod = "mean";
 
 cfg.fooof = struct();
