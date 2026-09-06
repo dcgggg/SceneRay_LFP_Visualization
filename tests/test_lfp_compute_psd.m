@@ -49,6 +49,7 @@ result = computeLfpPsd(data, artifactResult, cfg.psd);
 verifyEqual(testCase, result.frequencyHz(1), 1, 'AbsTol', result.frequencyResolutionHz);
 verifyLessThanOrEqual(testCase, result.frequencyHz(end), 40);
 verifyTrue(testCase, isfield(result, 'windowPsd'));
+verifyEqual(testCase, result.channelLabels, "ch1");
 end
 
 function data = base_data(signal, fs)

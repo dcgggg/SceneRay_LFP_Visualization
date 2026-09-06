@@ -58,6 +58,9 @@ verifySize(testCase, data.signal, [2 2]);
 verifyEqual(testCase, data.channelLabels, ["1-2", "5-6"]);
 verifyEqual(testCase, data.signal, [1 3; 2 4]);
 verifyEqual(testCase, data.metadata.blockCount, 2);
+verifyEqual(testCase, data.metadata.channelCount, 2);
+verifyEqual(testCase, data.channelCount, 2);
+verifyEqual(testCase, data.channelNames, ["1-2", "5-6"]);
 verifyEqual(testCase, data.metadata.contactIndices, {[1 2], [5 6]});
 verifyEqual(testCase, data.metadata.tagCode, ["A", "C"; "B", "D"]);
 end

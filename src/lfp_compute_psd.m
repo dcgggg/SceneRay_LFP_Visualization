@@ -105,6 +105,11 @@ spectrum = struct();
 spectrum.frequencyHz = frequencyHz;
 spectrum.psd = psd;
 spectrum.psdUnits = string(data.units) + "^2/Hz";
+spectrum.fs = fs;
+spectrum.units = string(data.units);
+spectrum.channelLabels = get_channel_labels(data, nChannels);
+spectrum.channelNames = spectrum.channelLabels;
+spectrum.channelCount = nChannels;
 spectrum.method = "Welch (manual base MATLAB)";
 spectrum.windowSeconds = windowSamples / fs;
 spectrum.overlapFraction = options.OverlapFraction;
@@ -163,5 +168,15 @@ elseif nnz(finite) == 1
 else
     index = (1:numel(values))';
     values(~finite) = interp1(index(finite), values(finite), index(~finite), 'linear', 'extrap');
+end
+end
+
+function labels = get_channel_labels(data, nChannels)
+if isfield(data, 'channelLabels') && numel(data.channelLabels) == nChannels
+    labels = string(data.channelLabels(:))';
+elseif isfield(data, 'channelNames') && numel(data.channelNames) == nChannels
+    labels = string(data.channelNames(:))';
+else
+    labels = "channel_" + string(1:nChannels);
 end
 end
