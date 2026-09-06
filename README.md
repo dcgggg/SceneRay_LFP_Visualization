@@ -18,6 +18,22 @@
 - 当前未检测到 EEGLAB 或 MATLAB 版 FOOOF/specparam；后续频谱参数化优先使用 FieldTrip 或 MATLAB 原生实现；
 - 不在运行时下载依赖。可选工具箱只用于加速或扩展，基础 MATLAB 路径负责核心兼容性。
 
+## 调用的代码、工具包与官方网站
+
+下表列出本项目实际调用、检测或作为算法依据的代码/工具包及其官方地址。核心分析路径只需要 MATLAB 本体，不调用 Python、R、Java、Node.js 或外部服务器。
+
+| 名称 | 代码中的用途 | 是否必需 | 官方网站 |
+| --- | --- | --- | --- |
+| MATLAB R2022b 或更高版本 | 运行全部分析、绘图和批处理函数；核心 PSD 使用 `fft`、`interp1` 等基础函数 | 必需 | [MATLAB](https://www.mathworks.com/products/matlab.html) |
+| MATLAB Unit Testing Framework | 运行 `tests/` 中的 `matlab.unittest` 自动化测试 | 仅开发/测试必需 | [MATLAB Unit Testing Framework](https://www.mathworks.com/help/matlab/matlab-unit-testing-framework.html) |
+| Signal Processing Toolbox | 由 `lfp_project_startup` 检测，可用于后续信号处理加速；当前手写 Welch PSD 不依赖它 | 可选 | [Signal Processing Toolbox](https://www.mathworks.com/products/signal.html) |
+| Statistics and Machine Learning Toolbox | 由 `lfp_project_startup` 检测；当前 fixed/no-knee 拟合提供 MATLAB 基础实现，不依赖它 | 可选 | [Statistics and Machine Learning Toolbox](https://www.mathworks.com/products/statistics.html) |
+| FieldTrip | `cfg.artifact.method = "fieldtrip"` 时调用 `ft_artifact_zvalue`；默认仍使用 native backend | 可选 | [FieldTrip](https://www.fieldtriptoolbox.org/) |
+| FOOOF | 提供功率谱参数化和工频插值方法的算法参考；本项目使用 MATLAB 原生实现，不在运行时调用 Python FOOOF | 参考资料，不是运行依赖 | [FOOOF documentation](https://fooof-tools.github.io/fooof/) |
+| `fooof.utils.interpolate_spectrum` | 40 Hz 及谐波的拟合前插值行为参考；对应 MATLAB 实现为 `lfp_interpolate_line_noise.m` | 参考资料，不是运行依赖 | [`interpolate_spectrum` 文档](https://fooof-tools.github.io/fooof/generated/fooof.utils.interpolate_spectrum.html) |
+
+`fooof_mat`、EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会影响仅使用 MATLAB 的运行方式；如未来增加对应 backend，会在本表和变更日志中单独注明。
+
 ## 当前状态
 
 当前已完成 SceneRay CSV 导入、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch PSD、40 Hz 谐波拟合前插值、fixed/no-knee 1/f 参数化、Gaussian 周期峰、频带功率、伪影/PSD/频带/模型对照图和结果导出。导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；当前约定为 1 kHz、μV。伪影只写入掩码和处理副本，不覆盖原始信号。
