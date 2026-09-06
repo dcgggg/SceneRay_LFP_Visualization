@@ -34,6 +34,21 @@ verifyEqual(testCase, result.fitStatus, "ok");
 verifyTrue(testCase, isfinite(result.aperiodicParams.offset));
 end
 
+function testInterpolatesLineNoiseOnlyInFittingCopy(testCase)
+ensure_src_on_path(testCase);
+cfg = lfpDefaultConfig();
+freq = (1:0.25:100)';
+base = 10 .^ (1.2 - 1.0*log10(freq));
+power = base;
+power(abs(freq-40) <= 2) = power(abs(freq-40) <= 2) * 100;
+power(abs(freq-80) <= 2) = power(abs(freq-80) <= 2) * 100;
+result = parameterizePowerSpectrum(freq, power, cfg.fooof);
+verifyTrue(testCase, result.lineNoise.enabled);
+verifyTrue(testCase, any(result.lineNoise.interpolatedMask));
+verifyEqual(testCase, result.inputPower, power);
+verifyTrue(testCase, any(abs(result.fittingPower - power) > 0));
+end
+
 function ensure_src_on_path(testCase)
 projectRoot = fileparts(fileparts(mfilename('fullpath')));
 srcRoot = fullfile(projectRoot, 'src');

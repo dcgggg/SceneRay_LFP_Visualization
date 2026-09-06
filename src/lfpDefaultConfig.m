@@ -46,9 +46,11 @@ cfg.fooof.maxNumberPeaks = 6;
 cfg.fooof.minPeakHeight = 0.10;
 cfg.fooof.peakThreshold = 2.5;
 cfg.fooof.fitErrorMetric = "rmse";
+cfg.fooof.interpolateLineNoise = true;
 cfg.fooof.lineFrequencyHz = 40;
 cfg.fooof.lineInterpolationHalfWidthHz = 2;
 cfg.fooof.lineInterpolationBufferSamples = 3;
+cfg.fooof.lineIncludeHarmonics = true;
 
 cfg.bands = struct();
 cfg.bands.delta = [1 4];
@@ -98,6 +100,12 @@ metadata(end+1) = item("fooof.frequencyRange", cfg.fooof.frequencyRange, "double
     "Frequency range used for fixed/no-knee parameterization.", "Spectral model");
 metadata(end+1) = item("fooof.aperiodicMode", cfg.fooof.aperiodicMode, "string", "", [], ...
     ["fixed" "knee"], "Aperiodic model selection; current native implementation supports fixed.", "Spectral model");
+metadata(end+1) = item("fooof.interpolateLineNoise", cfg.fooof.interpolateLineNoise, "logical", "", [0 1], [], ...
+    "Interpolate line-noise harmonics in a fitting copy only; original PSD is retained.", "Spectral model");
+metadata(end+1) = item("fooof.lineFrequencyHz", cfg.fooof.lineFrequencyHz, "double", "Hz", [eps Inf], [], ...
+    "Line-noise fundamental used for fitting-only interpolation.", "Spectral model");
+metadata(end+1) = item("fooof.lineInterpolationHalfWidthHz", cfg.fooof.lineInterpolationHalfWidthHz, "double", "Hz", [0 Inf], [], ...
+    "Half-width of each interpolation range around line-noise harmonics.", "Spectral model");
 metadata(end+1) = item("fooof.peakWidthLimits", cfg.fooof.peakWidthLimits, "double", "Hz", [0 Inf], [], ...
     "Lower/upper Gaussian bandwidth limits; lower bound is checked against frequency resolution.", "Spectral model");
 metadata(end+1) = item("fooof.maxNumberPeaks", cfg.fooof.maxNumberPeaks, "double", "count", [1 Inf], [], ...

@@ -33,6 +33,23 @@ end
 if any(~isfinite(freq)) || any(diff(freq) <= 0) || any(freq < 0)
     error('LFP:InvalidSpectrum', 'FREQ must be finite, nonnegative and strictly increasing.');
 end
+
+% Keep the supplied PSD untouched.  The line-noise interpolation is applied
+% only to a fitting copy, matching fooof.utils.interpolate_spectrum semantics.
+fitPower = power;
+lineNoise = struct('enabled', false, 'interpolatedMask', false(numel(freq), 1), ...
+    'rangesHz', zeros(0, 2), 'method', "not applied");
+if get_field(fooofCfg, 'interpolateLineNoise', true)
+    fittingSpectrum = lfp_interpolate_line_noise(struct( ...
+        'frequencyHz', freq, 'psd', power), ...
+        LineFrequencyHz=get_field(fooofCfg, 'lineFrequencyHz', 40), ...
+        InterpolationHalfWidthHz=get_field(fooofCfg, 'lineInterpolationHalfWidthHz', 2), ...
+        BufferSamples=get_field(fooofCfg, 'lineInterpolationBufferSamples', 3), ...
+        IncludeHarmonics=get_field(fooofCfg, 'lineIncludeHarmonics', true));
+    fitPower = fittingSpectrum.psdForFitting;
+    lineNoise = fittingSpectrum.lineNoise;
+    lineNoise.enabled = true;
+end
 frequencyResolution = median(diff(freq));
 fitRange = [max(fooofCfg.frequencyRange(1), min(freq(freq > 0))), ...
     min(fooofCfg.frequencyRange(2), freq(end))];
@@ -43,14 +60,17 @@ end
 nChannels = size(power, 2);
 modelResult = repmat(empty_result(), 1, nChannels);
 for channel = 1:nChannels
-    modelResult(channel) = fit_channel(freq, power(:, channel), fooofCfg, fitRange, frequencyResolution);
+    modelResult(channel) = fit_channel(freq, power(:, channel), fitPower(:, channel), ...
+        fooofCfg, fitRange, frequencyResolution, lineNoise);
 end
 end
 
-function result = fit_channel(freq, power, cfg, fitRange, frequencyResolution)
+function result = fit_channel(freq, inputPower, fittingPower, cfg, fitRange, frequencyResolution, lineNoise)
 result = empty_result();
 result.freq = freq;
-result.inputPower = power;
+result.inputPower = inputPower;
+result.fittingPower = fittingPower;
+result.lineNoise = lineNoise;
 result.frequencyResolution = frequencyResolution;
 result.fitRange = fitRange;
 result.settings = cfg;
@@ -64,14 +84,14 @@ if cfg.peakWidthLimits(2) <= cfg.peakWidthLimits(1) || any(cfg.peakWidthLimits <
     return;
 end
 
-valid = freq > 0 & freq >= fitRange(1) & freq <= fitRange(2) & isfinite(power) & power > 0;
+valid = freq > 0 & freq >= fitRange(1) & freq <= fitRange(2) & isfinite(fittingPower) & fittingPower > 0;
 if nnz(valid) < 5
     result.fitStatus = "insufficient_data";
     result.warnings(end + 1) = "Fewer than five valid positive-power points in fit range.";
     return;
 end
 logFrequency = log10(freq(valid));
-logPower = log10(power(valid));
+logPower = log10(fittingPower(valid));
 [initialCoefficients, initialKeep] = robust_background(logFrequency, logPower, cfg.peakThreshold);
 initialAperiodicLog = initialCoefficients(1) + initialCoefficients(2) * log10(max(freq, eps));
 flattenedInitial = logPower - ([ones(nnz(valid), 1), logFrequency] * initialCoefficients);
@@ -202,6 +222,7 @@ end
 
 function result = empty_result()
 result = struct('freq', [], 'inputPower', [], 'logPower', [], ...
+    'fittingPower', [], 'lineNoise', struct('enabled', false), ...
     'aperiodicParams', struct('offset', NaN, 'exponent', NaN, 'mode', "fixed"), ...
     'aperiodicFit', [], 'periodicFit', [], 'fullModelFit', [], ...
     'flattenedSpectrum', [], 'peakParams', empty_peaks(), ...
