@@ -4,15 +4,15 @@ This document records the implemented MATLAB definitions and their limits.
 
 ## Interference
 
-The current project assumption is 40 Hz device/line interference and integer harmonics below Nyquist. The fundamental frequency and notch width will be explicit parameters, not hidden defaults. This is not treated as stimulation artifact.
+The current project assumption is 40 Hz device/line interference and integer harmonics below Nyquist. The fundamental frequency and interpolation width are explicit parameters, not hidden defaults. Line noise is retained in the time-domain signal and PSD; by default it is not added to the artifact mask, because it is interpolated only in the fitting copy before spectral parameterization. This is not treated as stimulation artifact.
 
 ## Artifact policy
 
-Artifacts are represented as sample masks, channel masks and an events table. The default FieldTrip backend uses `ft_artifact_zvalue` when available; native checks complement it for high amplitude, jump/spike, flatline, saturation, high-frequency burst, strong 40-Hz projection, bad channels and manual intervals. The native backend is available without FieldTrip. Detection is not proof of head motion or any physiological source. Default handling is mask-based exclusion; reconstruction is not silently performed.
+Artifacts are represented as sample masks, channel masks and an events table. The default native backend detects high amplitude, jump/spike, flatline, saturation, high-frequency burst, bad channels and manual intervals independently per channel. Strong 40-Hz projection can be enabled explicitly with `cfg.artifact.lineNoiseDetection=true`, but is disabled by default so line noise remains available for fitting-only interpolation. FieldTrip is an explicit optional backend using `ft_artifact_zvalue`; its returned time intervals are applied to all channels. Detection is not proof of head motion or any physiological source. Default handling is mask-based exclusion; reconstruction is not silently performed.
 
 ## PSD and bands
 
-PSD units are signal-unit-squared per Hz. PSD is computed from clean windows only, with per-window PSD and per-frequency valid-window counts saved. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
+PSD units are signal-unit-squared per Hz. PSD is computed from artifact-aware windows, with per-window PSD and per-frequency valid-window counts saved. `cfg.psd.maxArtifactFraction` controls the tolerated invalid/artifact fraction: the default 0.05 rejects heavily contaminated windows and linearly fills only the small accepted fraction; setting it to 0 rejects any window containing an invalid sample. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
 
 ## Aperiodic and periodic components
 

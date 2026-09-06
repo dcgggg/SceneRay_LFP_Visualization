@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Revised artifact defaults for LFP: native channel-specific detection is now the default, 40-Hz line noise is retained unless explicitly enabled for time-domain rejection, and PSD windows use a configurable artifact-fraction tolerance. Full-record waveform display is now the default.
 - Enlarged interactive/export figures, added shared plot sizing/resolution settings, and changed artifact comparison to a one-column Raw/Clean panel pair for every channel. Batch analysis can keep MATLAB figure windows open with `KeepFiguresOpen=true`.
 - Added unified configuration, FieldTrip/native artifact API, strict artifact-aware PSD metadata, fixed/no-knee Gaussian spectral parameterization, cfg-compatible entry points, and before/after/model summary plots.
 - Parameterization now performs configurable 40-Hz harmonic interpolation on a fitting-only PSD copy and preserves raw/fitting spectra separately. Artifact comparison plots now include before/after amplitude distributions, channel fractions, event counts, and durations; plotting and cfg-compatible entry points expose parent/history handles for future GUI integration.

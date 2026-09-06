@@ -4,9 +4,9 @@ function cfg = lfpDefaultConfig()
 %   calling the analysis functions. No function reads user input dialogs.
 
 cfg = struct();
-cfg.version = "0.5.0";
+cfg.version = "0.6.0";
 cfg.artifact = struct();
-cfg.artifact.method = "fieldtrip";
+cfg.artifact.method = "native";
 cfg.artifact.nativeFallback = true;
 cfg.artifact.fieldtripCutoff = 6;
 cfg.artifact.paddingSeconds = 0.010;
@@ -22,6 +22,7 @@ cfg.artifact.highFrequencyWindowSeconds = 0.250;
 cfg.artifact.highFrequencyZ = 8;
 cfg.artifact.lineFrequencyHz = 40;
 cfg.artifact.lineHarmonics = true;
+cfg.artifact.lineNoiseDetection = false;
 cfg.artifact.lineWindowSeconds = 1;
 cfg.artifact.lineNoiseRatioThreshold = 0.50;
 cfg.artifact.badChannelFraction = 0.50;
@@ -35,7 +36,7 @@ cfg.psd.nfft = 0;
 cfg.psd.taper = "hann";
 cfg.psd.frequencyRange = [1 40];
 cfg.psd.excludeArtifacts = true;
-cfg.psd.maxArtifactFraction = 0;
+cfg.psd.maxArtifactFraction = 0.05;
 cfg.psd.aggregationMethod = "mean";
 
 cfg.fooof = struct();
@@ -65,7 +66,7 @@ cfg.plot.visible = "on";
 cfg.plot.frequencyScale = "linear";
 cfg.plot.powerScale = "log10";
 cfg.plot.frequencyRange = [1 40];
-cfg.plot.maxPlotSeconds = 30;
+cfg.plot.maxPlotSeconds = Inf;
 cfg.plot.channelIndex = [];
 cfg.plot.parent = [];
 cfg.plot.showArtifactLabels = true;
@@ -77,7 +78,7 @@ cfg.plot.exportResolution = 300;
 
 cfg.export = struct();
 cfg.export.exportFigure = true;
-cfg.export.figureResolution = 150;
+cfg.export.figureResolution = 300;
 
 cfg.parameterMetadata = build_parameter_metadata(cfg);
 end
@@ -91,6 +92,8 @@ metadata(end+1) = item("artifact.fieldtripCutoff", cfg.artifact.fieldtripCutoff,
     "FieldTrip z-value cutoff; must be tuned to the LFP distribution.", "Artifact");
 metadata(end+1) = item("artifact.paddingSeconds", cfg.artifact.paddingSeconds, "double", "s", [0 Inf], [], ...
     "Padding applied around detected artifact samples.", "Artifact");
+metadata(end+1) = item("artifact.lineNoiseDetection", cfg.artifact.lineNoiseDetection, "logical", "", [0 1], [], ...
+    "Time-domain 40-Hz rejection; disabled by default so line noise can be interpolated only during fitting.", "Artifact");
 metadata(end+1) = item("artifact.amplitudeZ", cfg.artifact.amplitudeZ, "double", "z", [0 Inf], [], ...
     "Robust amplitude threshold for the native backend.", "Artifact");
 metadata(end+1) = item("artifact.derivativeZ", cfg.artifact.derivativeZ, "double", "z", [0 Inf], [], ...
@@ -101,6 +104,8 @@ metadata(end+1) = item("psd.overlapFraction", cfg.psd.overlapFraction, "double",
     "Fractional overlap between adjacent windows.", "PSD");
 metadata(end+1) = item("psd.frequencyRange", cfg.psd.frequencyRange, "double", "Hz", [0 Inf], [], ...
     "Frequency range retained in the PSD result.", "PSD");
+metadata(end+1) = item("psd.maxArtifactFraction", cfg.psd.maxArtifactFraction, "double", "fraction", [0 1], [], ...
+    "Maximum invalid/artifact fraction accepted in a PSD window when exclusion is enabled.", "PSD");
 metadata(end+1) = item("fooof.frequencyRange", cfg.fooof.frequencyRange, "double", "Hz", [0 Inf], [], ...
     "Frequency range used for fixed/no-knee parameterization.", "Spectral model");
 metadata(end+1) = item("fooof.aperiodicMode", cfg.fooof.aperiodicMode, "string", "", [], ...

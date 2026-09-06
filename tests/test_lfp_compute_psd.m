@@ -32,6 +32,20 @@ verifyEqual(testCase, out.spectrum.windowCount, 2);
 verifyEqual(testCase, out.spectrum.acceptedWindowStarts{1}, [2001; 3001]);
 end
 
+function testAllowsConfiguredSmallArtifactFraction(testCase)
+ensure_src_on_path(testCase);
+fs = 1000;
+t = (0:3999)' / fs;
+x = sin(2*pi*12*t);
+data = base_data(x, fs);
+data.artifacts = struct('channelMask', false(size(x)));
+data.artifacts.channelMask(101:110) = true;
+out = lfp_compute_psd(data, WindowSeconds=1, OverlapFraction=0, ...
+    MaxArtifactFraction=0.05);
+verifyEqual(testCase, out.spectrum.windowCount, 4);
+verifyEqual(testCase, out.spectrum.filledSampleCount, 10);
+end
+
 function testShortSignalAndInvalidData(testCase)
 ensure_src_on_path(testCase);
 data = base_data(sin((1:100)'), 1000);

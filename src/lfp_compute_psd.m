@@ -64,15 +64,17 @@ for channelIndex = 1:nChannels
         last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
         invalid = ~isfinite(segment) | artifactMask(first:last, channelIndex);
-        if options.ExcludeArtifacts && any(invalid)
+        artifactFraction = mean(invalid);
+        % MaxArtifactFraction is the explicit tolerance for a window. With
+        % the default 0, any invalid/artifact sample rejects the window. A
+        % positive value permits a small contaminated portion and records
+        % the local linear fill in filledSampleCount.
+        if options.ExcludeArtifacts && artifactFraction > options.MaxArtifactFraction
             continue;
         end
-        if mean(invalid) > options.MaxArtifactFraction
-            continue;
-        end
-        filledSampleCount(channelIndex) = filledSampleCount(channelIndex) + nnz(invalid);
-        segment(invalid) = NaN;
-        if any(isnan(segment))
+        if any(invalid)
+            filledSampleCount(channelIndex) = filledSampleCount(channelIndex) + nnz(invalid);
+            segment(invalid) = NaN;
             segment = fill_linear(segment);
         end
         if options.DetrendConstant

@@ -2,11 +2,12 @@ function [cleanData, artifactResult] = detectAndHandleArtifacts(data, artifactCf
 %DETECTANDHANDLEARTIFACTS Detect and annotate common LFP artifacts.
 %   [CLEANDATA, ARTIFACTRESULT] = DETECTANDHANDLEARTIFACTS(DATA, CFG)
 %   preserves DATA.signal and returns a NaN-marked display/analysis copy in
-%   CLEANDATA.cleanedSignal. CFG.method can be "fieldtrip" or "native".
-%   The FieldTrip backend is attempted when available and falls back to the
-%   native detector when CFG.nativeFallback is true. No reconstruction is
-%   performed unless CFG.reconstruct is explicitly enabled (not implemented
-%   in this first backend; an error is raised rather than silently filling).
+%   CLEANDATA.cleanedSignal. The default native backend detects artifacts
+%   independently per channel. FieldTrip remains an explicit optional
+%   backend; its returned intervals are global because ft_artifact_zvalue
+%   reports time intervals rather than channel-specific masks. Line noise is
+%   not a time-domain artifact by default: 40-Hz harmonics remain available
+%   for fitting-only interpolation later in the pipeline.
 
 arguments
     data (1,1) struct
@@ -135,6 +136,7 @@ try
     ftCfg.artfctdef.zvalue.absdiff = 'yes';
     [~, artifact] = ft_artifact_zvalue(ftCfg, ftData);
     if ~isempty(artifact)
+        warnings(end + 1) = "FieldTrip intervals are applied to all channels; use method='native' for channel-specific masks.";
         for index = 1:size(artifact, 1)
             first = max(1, round(artifact(index, 1)));
             last = min(nSamples, round(artifact(index, 2)));
@@ -192,9 +194,13 @@ for channel = 1:nChannels
     [mask, events] = merge_reason(mask, events, highFrequency, channel, "high_frequency_burst", ...
         get_field(cfg, 'highFrequencyZ', 8), "native.high_frequency_envelope");
 
-    lineNoise = detect_line_noise(x, fs, cfg);
-    [mask, events] = merge_reason(mask, events, lineNoise, channel, "line_noise", ...
-        get_field(cfg, 'lineNoiseRatioThreshold', 0.5), "native.line_projection");
+    % 40-Hz interference is preserved for fitting-only interpolation unless
+    % a user explicitly enables time-domain line-noise rejection.
+    if get_field(cfg, 'lineNoiseDetection', false)
+        lineNoise = detect_line_noise(x, fs, cfg);
+        [mask, events] = merge_reason(mask, events, lineNoise, channel, "line_noise", ...
+            get_field(cfg, 'lineNoiseRatioThreshold', 0.5), "native.line_projection");
+    end
 end
 end
 

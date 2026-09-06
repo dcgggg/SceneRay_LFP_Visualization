@@ -44,6 +44,10 @@ plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot
 files = lfp_export_results(cleanData, "results");
 ```
 
+默认伪迹处理使用逐通道的 native 检测，并保留原始 `data.signal`。伪迹只写入 `artifactResult.channelMask`，显示副本 `cleanData.cleanedSignal` 将对应样本标为 `NaN`；不会自动把前后数据拼接或重建。40 Hz 及其 Nyquist 以下谐波默认不作为时间域伪迹删除，而是在频谱参数化的拟合副本中插值。若明确需要 FieldTrip，可设置 `cfg.artifact.method = "fieldtrip"`，但其时间区间会应用到所有通道。
+
+PSD 默认允许每个窗口最多 5% 的无效/伪迹样本（`cfg.psd.maxArtifactFraction = 0.05`）；超过阈值的窗口排除，低于阈值的样本只在该 PSD 窗口内线性填补，并记录到 `filledSampleCount`。将阈值设为 `0` 可恢复严格的窗口排除模式。
+
 ## 批量处理文件夹
 
 如果需要一次处理文件夹中的所有 CSV，可以只调用一次批处理入口。每个文件内部的多个 `Channel` 区块会自动变成独立通道列，后续 PSD、参数化和频段功率均按通道分别计算：
@@ -103,6 +107,6 @@ docs/      架构、数据格式和算法说明
 
 ## 交互式绘图
 
-绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
+绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。波形默认显示整个记录（`cfg.plot.maxPlotSeconds = Inf`）；长记录可改成具体秒数。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
 
 保存图片默认使用较大的画布（1600×1100 像素）和 300 DPI，可在 `cfg.plot.figurePosition`、`cfg.plot.exportResolution` 中调整。

@@ -43,6 +43,19 @@ verifyTrue(testCase, any(result.events.artifactType == "manual"));
 verifyTrue(testCase, any(contains(result.warnings, "FieldTrip")) || result.method == "fieldtrip");
 end
 
+function testLineNoiseIsRetainedByDefault(testCase)
+ensure_src_on_path(testCase);
+fs = 1000;
+t = (0:3999)' / fs;
+data = fixture_data(sin(2*pi*40*t), fs);
+cfg = lfpDefaultConfig();
+cfg.artifact.method = "native";
+cfg.artifact.paddingSeconds = 0;
+[~, result] = detectAndHandleArtifacts(data, cfg.artifact);
+verifyFalse(testCase, any(result.events.artifactType == "line_noise"));
+verifyLessThan(testCase, nnz(result.channelMask), 0.1*numel(t));
+end
+
 function data = fixture_data(signal, fs)
 data = struct('signal', signal, 'fs', fs, 'time', (0:size(signal,1)-1)'/fs, ...
     'channelLabels', "ch1", 'units', "uV", 'metadata', struct(), ...

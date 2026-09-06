@@ -7,7 +7,7 @@ arguments
     data (1,1) struct
     options.Visible (1,1) string {mustBeMember(options.Visible, ["on", "off"])} = "on"
     options.ChannelIndex double {mustBeInteger, mustBePositive} = []
-    options.MaxPlotSeconds (1,1) double {mustBeFinite, mustBePositive} = 30
+    options.MaxPlotSeconds (1,1) double {mustBePositive} = Inf
     options.FigurePosition double = []
 end
 
