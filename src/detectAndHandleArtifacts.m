@@ -46,7 +46,8 @@ elseif methodRequested ~= "native"
     error('LFP:InvalidArtifactMethod', 'Supported methods are fieldtrip, native, and asr.');
 end
 
-[nativeMask, nativeEvents] = run_native_backend(signal, fs, artifactCfg, nativeEvents);
+skipNativeJump = methodRequested == "fieldtrip" && isfield(reasonMasks, 'fieldtrip');
+[nativeMask, nativeEvents] = run_native_backend(signal, fs, artifactCfg, nativeEvents, skipNativeJump);
 if methodRequested == "fieldtrip" && isfield(reasonMasks, 'fieldtrip')
     combinedMask = nativeMask | reasonMasks.fieldtrip;
 else
@@ -76,7 +77,7 @@ artifactResult.badChannels = find_bad_channels(combinedMask, signal, artifactCfg
 artifactResult.method = methodUsed;
 artifactResult.methodRequested = methodRequested;
 artifactResult.parameters = artifactCfg;
-artifactResult.summary = summarize_events(events, artifactResult.badChannels, nSamples, nChannels, fs);
+artifactResult.summary = summarize_events(events, artifactResult.badChannels, nSamples, nChannels, fs, combinedMask);
 artifactResult.retainedDuration = nnz(~globalMask) / fs;
 artifactResult.rejectedDuration = nnz(globalMask) / fs;
 artifactResult.rejectedPercentage = 100 * nnz(globalMask) / max(nSamples, 1);
@@ -148,8 +149,9 @@ catch exception
 end
 end
 
-function [mask, events] = run_native_backend(signal, fs, cfg, events)
+function [mask, events] = run_native_backend(signal, fs, cfg, events, skipJump)
 [nSamples, nChannels] = size(signal);
+if nargin < 5, skipJump = false; end
 mask = false(nSamples, nChannels);
 for channel = 1:nChannels
     x = signal(:, channel);
@@ -166,13 +168,15 @@ for channel = 1:nChannels
     [mask, events] = merge_reason(mask, events, amplitude, channel, "high_amplitude", ...
         get_field(cfg, 'amplitudeZ', 8), "native.robust_amplitude");
 
-    dx = [0; diff(x)];
-    dFinite = dx(isfinite(dx));
-    dCenter = median(dFinite);
-    dSigma = robust_scale(dFinite - dCenter);
-    jump = isfinite(dx) & dSigma > 0 & abs(dx - dCenter) > get_field(cfg, 'derivativeZ', 8) * dSigma;
-    [mask, events] = merge_reason(mask, events, jump, channel, "jump_spike", ...
-        get_field(cfg, 'derivativeZ', 8), "native.robust_derivative");
+    if ~skipJump
+        dx = [0; diff(x)];
+        dFinite = dx(isfinite(dx));
+        dCenter = median(dFinite);
+        dSigma = robust_scale(dFinite - dCenter);
+        jump = isfinite(dx) & dSigma > 0 & abs(dx - dCenter) > get_field(cfg, 'derivativeZ', 8) * dSigma;
+        [mask, events] = merge_reason(mask, events, jump, channel, "jump_spike", ...
+            get_field(cfg, 'derivativeZ', 8), "native.robust_derivative");
+    end
 
     saturation = detect_saturation(x, get_field(cfg, 'saturationAbsoluteThresholdUV', 5000), ...
         get_field(cfg, 'saturationRunLength', 5));
@@ -358,13 +362,12 @@ bad = find(mean(mask, 1) >= get_field(cfg, 'badChannelFraction', 0.5) | ...
 bad = bad(:);
 end
 
-function summary = summarize_events(events, badChannels, nSamples, nChannels, fs)
+function summary = summarize_events(events, badChannels, nSamples, nChannels, fs, channelMask)
 summary = struct('eventCount', height(events), 'badChannelCount', numel(badChannels), ...
     'channelArtifactPercentage', zeros(1, nChannels), 'countsByType', struct(), ...
     'durationByTypeSeconds', struct());
 for channel = 1:nChannels
-    rows = events.channel == channel;
-    summary.channelArtifactPercentage(channel) = 100 * nnz(rows) / max(nSamples, 1);
+    summary.channelArtifactPercentage(channel) = 100 * nnz(channelMask(:, channel)) / max(nSamples, 1);
 end
 types = unique(events.artifactType);
 for index = 1:numel(types)
