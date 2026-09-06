@@ -12,7 +12,7 @@ Artifacts are represented as sample masks, channel masks and an events table. Th
 
 ## PSD and bands
 
-PSD units are signal-unit-squared per Hz. PSD is computed from clean windows only, with per-window PSD and per-frequency valid-window counts saved. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total, relative, log, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
+PSD units are signal-unit-squared per Hz. PSD is computed from clean windows only, with per-window PSD and per-frequency valid-window counts saved. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
 
 ## Aperiodic and periodic components
 

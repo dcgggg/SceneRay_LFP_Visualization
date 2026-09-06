@@ -16,6 +16,7 @@ out = lfp_compute_band_power(data, ReferenceRangeHz=[1 100]);
 rows = out.bandPower.table;
 deltaChannel1 = rows(rows.band == "delta" & rows.channelIndex == 1, :);
 verifyEqual(testCase, deltaChannel1.totalPower, 3, 'AbsTol', 1e-12);
+verifyEqual(testCase, deltaChannel1.logTotalPower, log10(3), 'AbsTol', 1e-12);
 verifyEqual(testCase, deltaChannel1.relativePower, 3/99, 'AbsTol', 1e-12);
 verifyEqual(testCase, deltaChannel1.aperiodicPower, 0.75, 'AbsTol', 1e-12);
 verifyEqual(testCase, deltaChannel1.periodicPower, 2.25, 'AbsTol', 1e-12);

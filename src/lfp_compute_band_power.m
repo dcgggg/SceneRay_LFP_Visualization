@@ -55,6 +55,7 @@ totalPower = NaN(rows, 1);
 relativePower = NaN(rows, 1);
 aperiodicPower = NaN(rows, 1);
 periodicPower = NaN(rows, 1);
+logTotalPower = NaN(rows, 1);
 row = 0;
 for bandIndex = 1:nBands
     bandMask = frequencyHz >= bands(bandIndex).rangeHz(1) & ...
@@ -68,6 +69,9 @@ for bandIndex = 1:nBands
         highHz(row) = bands(bandIndex).rangeHz(2);
         if nnz(bandMask) >= 2
             totalPower(row) = integrate_columns(frequencyHz(bandMask), totalPsd(bandMask, channel));
+            if isfinite(totalPower(row)) && totalPower(row) > 0
+                logTotalPower(row) = log10(totalPower(row));
+            end
             relativePower(row) = totalPower(row) / max(referencePower(channel), eps);
             if hasParameterization
                 aperiodicPower(row) = integrate_columns(frequencyHz(bandMask), aperiodicPsd(bandMask, channel));
@@ -78,9 +82,9 @@ for bandIndex = 1:nBands
 end
 
 resultTable = table(channelIndex, channelLabel, bandName, lowHz, highHz, ...
-    totalPower, relativePower, aperiodicPower, periodicPower, ...
+    totalPower, logTotalPower, relativePower, aperiodicPower, periodicPower, ...
     'VariableNames', {'channelIndex', 'channelLabel', 'band', 'lowHz', 'highHz', ...
-    'totalPower', 'relativePower', 'aperiodicPower', 'periodicPower'});
+    'totalPower', 'logTotalPower', 'relativePower', 'aperiodicPower', 'periodicPower'});
 data.bandPower = struct('table', resultTable, 'bands', bands, ...
     'referenceRangeHz', options.ReferenceRangeHz, ...
     'referencePower', referencePower, 'hasParameterization', hasParameterization, ...
