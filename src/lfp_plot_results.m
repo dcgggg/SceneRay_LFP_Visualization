@@ -48,7 +48,7 @@ if isfield(data, 'spectrum')
     if isfield(data, 'spectralParameters')
         semilogy(frequencyHz, data.spectralParameters.aperiodicPsd(:, channels), '--', 'LineWidth', 1.0);
     end
-    if isfield(data.spectrum, 'lineNoise')
+    if isfield(data.spectrum, 'lineNoise') && ~isempty(data.spectrum.lineNoise.harmonicCentersHz)
         xline(data.spectrum.lineNoise.harmonicCentersHz, ':', 'Color', [0.5 0.5 0.5]);
     end
     hold off; xlim([max(0, frequencyHz(1)), frequencyHz(end)]);

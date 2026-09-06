@@ -14,6 +14,8 @@ out = lfp_compute_psd(data, WindowSeconds=2, OverlapFraction=0.5);
 [~, peakIndex] = max(out.spectrum.psd);
 verifyEqual(testCase, out.spectrum.frequencyHz(peakIndex), 10, 'AbsTol', 0.6);
 verifyTrue(testCase, out.spectrum.includesLineNoise);
+verifySize(testCase, out.spectrum.windowPsd, [numel(out.spectrum.frequencyHz), 3, 1]);
+verifyTrue(testCase, all(out.spectrum.validWindowCountPerFrequency == 3));
 verifyEqual(testCase, out.processingHistory(end).operation, "psd");
 end
 

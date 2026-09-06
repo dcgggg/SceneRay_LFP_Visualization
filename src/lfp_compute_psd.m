@@ -9,8 +9,12 @@ arguments
     options.WindowSeconds (1,1) double {mustBeFinite, mustBePositive} = 4
     options.OverlapFraction (1,1) double {mustBeFinite, mustBeGreaterThanOrEqual(options.OverlapFraction, 0), mustBeLessThan(options.OverlapFraction, 1)} = 0.5
     options.Nfft (1,1) double {mustBeInteger, mustBeNonnegative} = 0
-    options.MaxArtifactFraction (1,1) double {mustBeFinite, mustBeGreaterThanOrEqual(options.MaxArtifactFraction, 0), mustBeLessThanOrEqual(options.MaxArtifactFraction, 1)} = 0.10
+    options.MaxArtifactFraction (1,1) double {mustBeFinite, mustBeGreaterThanOrEqual(options.MaxArtifactFraction, 0), mustBeLessThanOrEqual(options.MaxArtifactFraction, 1)} = 0
     options.DetrendConstant (1,1) logical = true
+    options.ExcludeArtifacts (1,1) logical = true
+    options.AggregationMethod (1,1) string {mustBeMember(options.AggregationMethod, ["mean" "median"])} = "mean"
+    options.Taper (1,1) string {mustBeMember(options.Taper, "hann")} = "hann"
+    options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 40]
 end
 
 validate_data(data);
@@ -25,15 +29,23 @@ if options.Nfft == 0
 else
     nfft = max(windowSamples, options.Nfft);
 end
+if options.FrequencyRangeHz(2) <= options.FrequencyRangeHz(1)
+    error('LFP:InvalidFrequencyRange', 'FrequencyRangeHz must be increasing.');
+end
 window = hann_vector(windowSamples);
 normalization = fs * sum(window .^ 2);
-frequencyHz = (0:floor(nfft / 2))' * fs / nfft;
+fullFrequencyHz = (0:floor(nfft / 2))' * fs / nfft;
+frequencyMask = fullFrequencyHz >= options.FrequencyRangeHz(1) & ...
+    fullFrequencyHz <= min(options.FrequencyRangeHz(2), fs/2);
+frequencyHz = fullFrequencyHz(frequencyMask);
 psd = NaN(numel(frequencyHz), nChannels);
 acceptedWindows = cell(1, nChannels);
 windowStarts = 1:stepSamples:max(1, nSamples - windowSamples + 1);
 if windowStarts(end) + windowSamples - 1 < nSamples
     windowStarts(end + 1) = nSamples - windowSamples + 1;
 end
+windowPsd = NaN(numel(frequencyHz), numel(windowStarts), nChannels);
+filledSampleCount = zeros(1, nChannels);
 
 artifactMask = false(nSamples, nChannels);
 if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask')
@@ -52,9 +64,13 @@ for channelIndex = 1:nChannels
         last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
         invalid = ~isfinite(segment) | artifactMask(first:last, channelIndex);
+        if options.ExcludeArtifacts && any(invalid)
+            continue;
+        end
         if mean(invalid) > options.MaxArtifactFraction
             continue;
         end
+        filledSampleCount(channelIndex) = filledSampleCount(channelIndex) + nnz(invalid);
         segment(invalid) = NaN;
         if any(isnan(segment))
             segment = fill_linear(segment);
@@ -69,12 +85,18 @@ for channelIndex = 1:nChannels
         else
             power(2:end) = 2 * power(2:end);
         end
+        power = power(frequencyMask);
+        windowPsd(:, windowIndex, channelIndex) = power;
         accumulated = accumulated + power;
         count = count + 1;
         accepted(windowIndex) = true;
     end
     if count > 0
-        psd(:, channelIndex) = accumulated / count;
+        if options.AggregationMethod == "median"
+            psd(:, channelIndex) = median(windowPsd(:, accepted, channelIndex), 2, 'omitnan');
+        else
+            psd(:, channelIndex) = accumulated / count;
+        end
     end
     acceptedWindows{channelIndex} = windowStarts(accepted(:))';
 end
@@ -89,11 +111,19 @@ spectrum.overlapFraction = options.OverlapFraction;
 spectrum.nfft = nfft;
 spectrum.windowCount = cellfun(@numel, acceptedWindows);
 spectrum.acceptedWindowStarts = acceptedWindows;
+spectrum.allWindowStarts = windowStarts(:);
+spectrum.windowPsd = windowPsd;
+spectrum.validWindowCountPerFrequency = sum(isfinite(windowPsd), 2);
+spectrum.frequencyResolutionHz = fs / nfft;
+spectrum.excludedWindowCount = numel(windowStarts) - spectrum.windowCount;
+spectrum.filledSampleCount = filledSampleCount;
 spectrum.includesLineNoise = true;
 spectrum.parameters = struct('windowSeconds', options.WindowSeconds, ...
     'windowSamples', windowSamples, 'overlapFraction', options.OverlapFraction, ...
     'nfft', nfft, 'maxArtifactFraction', options.MaxArtifactFraction, ...
-    'detrendConstant', options.DetrendConstant);
+    'detrendConstant', options.DetrendConstant, 'excludeArtifacts', options.ExcludeArtifacts, ...
+    'aggregationMethod', options.AggregationMethod, 'taper', options.Taper, ...
+    'frequencyRangeHz', options.FrequencyRangeHz);
 data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
     'notes', "Manual Welch PSD from raw signal; artifact-heavy windows excluded; 40-Hz harmonics retained.");
