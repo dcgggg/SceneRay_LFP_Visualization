@@ -1,5 +1,6 @@
-%EXAMPLE_LFP_ANALYSIS Run the script/API LFP workflow.
-% Edit inputFile and outputFolder before running. No data are hard-coded.
+%EXAMPLE_LFP_ANALYSIS Run the single-file script/API LFP workflow.
+% Edit inputFile and outputFolder before running. All Channel blocks in the
+% file are still imported and analyzed as separate channels.
 
 projectRoot = fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(projectRoot, 'src'));
