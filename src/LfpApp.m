@@ -530,7 +530,7 @@ classdef LfpApp < handle
             end
             dialog = uifigure('Name', 'CSV 导入确认', 'WindowStyle', 'modal', 'Position', [120 100 1200 700]);
             dg = uigridlayout(dialog, [8 4]); dg.RowHeight = {230, 28, 28, 28, 28, 28, '1x', 36}; dg.ColumnWidth = {160, 180, 160, '1x'};
-            preview = uitable(dg, 'Data', inspection.preview, 'ColumnEditable', false); preview.Layout.Row = 1; preview.Layout.Column = [1 5];
+            preview = uitable(dg, 'Data', inspection.preview, 'ColumnEditable', false); preview.Layout.Row = 1; preview.Layout.Column = [1 4];
             note = uilabel(dg, 'Text', "检测结果：" + inspection.formatSuggestion + " | " + strjoin(inspection.warnings, " "), 'WordWrap', 'on'); note.Layout.Row = 2; note.Layout.Column = [1 4];
             uilabel(dg, 'Text', '分隔符'); delimiter = uidropdown(dg, 'Items', {',', ';', 'tab'}, 'Value', ','); delimiter.Layout.Row = 3; delimiter.Layout.Column = 2;
             uilabel(dg, 'Text', '表头行（0=无）'); header = uieditfield(dg, 'numeric', 'Value', inspection.headerRowSuggestion); header.Layout.Row = 3; header.Layout.Column = 4;

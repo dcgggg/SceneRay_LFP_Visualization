@@ -47,7 +47,11 @@ inspection = struct();
 inspection.filename = filename;
 inspection.delimiter = string(options.Delimiter);
 inspection.cells = cells;
-inspection.preview = cells(1:previewRows, :);
+% Keep the raw cells unchanged for import, but expose a uitable-safe copy for
+% GUI preview.  MATLAB uitable accepts only numeric, logical, or char values
+% inside a cell array; readcell may return string, missing, datetime, or other
+% scalar types depending on the CSV content.
+inspection.preview = preview_for_uitable(cells(1:previewRows, :));
 inspection.rowCount = nRows;
 inspection.columnCount = nColumns;
 inspection.isSceneRay = isSceneRay;
@@ -249,4 +253,42 @@ end
 
 function value = ternary(condition, first, second)
 if condition, value = first; else, value = second; end
+end
+
+function preview = preview_for_uitable(rawCells)
+%PREVIEW_FOR_UITABLE Convert only the display copy to uitable-safe values.
+preview = cell(size(rawCells));
+for row = 1:size(rawCells, 1)
+    for column = 1:size(rawCells, 2)
+        value = rawCells{row, column};
+        if isnumeric(value) && isscalar(value)
+            preview{row, column} = value;
+        elseif islogical(value) && isscalar(value)
+            preview{row, column} = value;
+        elseif ischar(value)
+            preview{row, column} = value;
+        elseif isstring(value) && isscalar(value)
+            if ismissing(value)
+                preview{row, column} = '';
+            else
+                preview{row, column} = char(value);
+            end
+        elseif isempty(value)
+            preview{row, column} = '';
+        else
+            % This fallback keeps the preview robust for uncommon scalar
+            % values without changing the raw cell stored in inspection.cells.
+            try
+                token = string(value);
+                if ismissing(token)
+                    preview{row, column} = '';
+                else
+                    preview{row, column} = char(token);
+                end
+            catch
+                preview{row, column} = '';
+            end
+        end
+    end
+end
 end

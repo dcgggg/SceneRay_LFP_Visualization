@@ -19,6 +19,12 @@ verifyFalse(testCase, inspection.isSceneRay);
 verifyEqual(testCase, inspection.headerRowSuggestion, 1);
 verifyEqual(testCase, inspection.timeColumnSuggestion, 1);
 verifyEqual(testCase, inspection.signalColumnsSuggestion, [2 3]);
+for row = 1:size(inspection.preview, 1)
+    for column = 1:size(inspection.preview, 2)
+        value = inspection.preview{row, column};
+        verifyTrue(testCase, isnumeric(value) || islogical(value) || ischar(value));
+    end
+end
 
 [data, info] = lfp_import_csv_configured(filename);
 verifyEqual(testCase, info.usedFormat, "generic");
