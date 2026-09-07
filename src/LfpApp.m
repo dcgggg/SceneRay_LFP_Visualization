@@ -882,7 +882,7 @@ classdef LfpApp < handle
             if isempty(fieldnames(app.ArtifactResult)) || ~isfield(app.ArtifactResult,'events') || ~istable(app.ArtifactResult.events)
                 app.Controls.ArtifactTable.Data=cell(0,9); return;
             end
-            e=app.ArtifactResult.events; if isempty(e), app.Controls.ArtifactTable.Data=cell(0,9); else app.Controls.ArtifactTable.Data=table2cell(e); app.Controls.ArtifactTable.ColumnName=e.Properties.VariableNames; end
+            e=app.ArtifactResult.events; if isempty(e), app.Controls.ArtifactTable.Data=cell(0,9); else app.Controls.ArtifactTable.Data=lfp_table_to_uitable_data(e); app.Controls.ArtifactTable.ColumnName=e.Properties.VariableNames; end
         end
 
         function renderPsd(app)
@@ -912,7 +912,7 @@ classdef LfpApp < handle
 
         function renderBand(app)
             cla(app.Controls.BandAxes); app.Controls.BandResultTable.Data=cell(0,1); if isempty(fieldnames(app.BandResult)) || ~isfield(app.BandResult,'table'), return; end
-            tbl=app.BandResult.table; app.Controls.BandResultTable.Data=table2cell(tbl); app.Controls.BandResultTable.ColumnName=tbl.Properties.VariableNames;
+            tbl=app.BandResult.table; app.Controls.BandResultTable.Data=lfp_table_to_uitable_data(tbl); app.Controls.BandResultTable.ColumnName=tbl.Properties.VariableNames;
             metric=string(app.Controls.BandMetric.Value); names=unique(tbl.band,'stable'); chans=unique(tbl.channelIndex,'stable'); values=NaN(numel(chans),numel(names));
             for i=1:numel(chans), for j=1:numel(names), row=tbl.channelIndex==chans(i)&tbl.band==names(j); if any(row), values(i,j)=tbl.(metric)(find(row,1)); end, end, end
             imagesc(app.Controls.BandAxes,values); colorbar(app.Controls.BandAxes); set(app.Controls.BandAxes,'XTick',1:numel(names),'XTickLabel',names,'YTick',1:numel(chans),'YTickLabel',chans); xlabel(app.Controls.BandAxes,'Band'); ylabel(app.Controls.BandAxes,'Channel'); title(app.Controls.BandAxes,'频段功率：'+metric); grid(app.Controls.BandAxes,'on');
