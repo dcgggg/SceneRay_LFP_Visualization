@@ -1,6 +1,6 @@
 # SceneRay MATLAB LFP Analysis
 
-模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本提供脚本/API 工作流；GUI 暂不实现。
+模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
 ## 目标
 
@@ -36,7 +36,7 @@
 
 ## 当前状态
 
-当前已完成 SceneRay CSV 导入、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch PSD、40 Hz 谐波拟合前插值、fixed/no-knee 1/f 参数化、Gaussian 周期峰、频带功率、伪影/PSD/频带/模型对照图和结果导出。导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；当前约定为 1 kHz、μV。伪影只写入掩码和处理副本，不覆盖原始信号。
+当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch PSD、40 Hz 谐波拟合前插值、fixed/no-knee 1/f 参数化、Gaussian 周期峰、频带功率、伪影/PSD/频带/模型对照图、结果导出以及 MATLAB 原生 GUI。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、方向、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
 
 `fooof_mat` 是 MATLAB 对 Python FOOOF 的封装，需要 Python 运行环境，因此不纳入本项目的核心依赖。FieldTrip/原生 MATLAB 路径将保持纯 MATLAB 运行。
 
@@ -59,6 +59,27 @@ plotSpectralModel(modelResult(1), cfg.plot);
 plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot);
 files = lfp_export_results(cleanData, "results");
 ```
+
+## MATLAB 原生 GUI
+
+在 MATLAB 命令窗口中从仓库根目录运行：
+
+```matlab
+addpath('src');
+app = launchLfpApp;
+```
+
+GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分析时间 → 调整参数 → 勾选模块 → 运行所选分析 → 查看图形/表格 → 保存配置或结果”。结果页包含：
+
+- **原始与伪迹**：全记录 Raw/Clean（伪迹样本以 NaN 断线）、伪迹色块和事件表；
+- **PSD**：有效窗口数量、频率分辨率、去伪迹前后 PSD 对照；
+- **FOOOF**：原始谱、完整模型、非周期背景、周期峰、offset/exponent/R²/误差和峰参数表；
+- **频段功率**：可编辑频段表、原始/相对/背景/周期功率指标和通道×频段热图；
+- **摘要**：多通道 PSD、拟合质量、频段功率和伪迹比例。
+
+“分析时间范围”和“波形显示范围”彼此独立。修改颜色、坐标或显示范围后使用“重新绘图”；修改 PSD、FOOOF、频段或伪迹参数会标记结果过期，必须重新运行。GUI 中的“伪迹重建”暂时禁用，默认只保存原始数据、mask、事件和 NaN 显示副本。没有有效时间列或时间间隔不规则时，GUI 会阻止需要均匀采样的 PSD 分析，并提示修正导入设置。
+
+GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出 band-power/processing-history CSV 和 PNG 总览图。自动保存选项使用带时间戳的子目录，不覆盖已有结果。
 
 默认伪迹处理使用逐通道的 native 检测，并启用严格短窗模式（`cfg.artifact.strictMode = true`）。严格模式按窗口内高于 `strictHighpassHz` 的 FFT 能量、导数能量和局部振幅范围检测持续突发，并将候选窗口之间不超过 `strictMergeGapSeconds` 的短间隙一并标记。原始 `data.signal` 始终保留；伪迹只写入 `artifactResult.channelMask`，显示副本 `cleanData.cleanedSignal` 将对应样本标为 `NaN`，不会自动把前后数据拼接或重建。40 Hz 及其 Nyquist 以下谐波默认不作为时间域伪迹删除，而是在频谱参数化的拟合副本中插值。若明确需要 FieldTrip，可设置 `cfg.artifact.method = "fieldtrip"`，但其时间区间会应用到所有通道。
 

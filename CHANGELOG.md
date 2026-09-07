@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a MATLAB-native `launchLfpApp`/`LfpApp` GUI for CSV import confirmation, channel/time selection, configurable artifact/PSD/FOOOF/band/plot parameters, run snapshots, cache-expiry status, result tabs, redraw and save workflows.
+- Added `lfp_inspect_csv` and `lfp_import_csv_configured` for previewed generic CSV import while preserving the existing SceneRay block-aware importer.
+- Added GUI/import smoke tests and documented generic CSV orientation and uniform-sampling validation.
+
 ## [0.6.0] - 2026-09-06
 
 - Added strict native burst marking based on short-window FFT high-frequency energy, derivative energy and local range, with configurable gap joining for sustained interference trains. The default PSD policy now rejects any window containing a marked sample.

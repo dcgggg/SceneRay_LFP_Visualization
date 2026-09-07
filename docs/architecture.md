@@ -10,7 +10,7 @@
 6. **Band analysis** — total, relative, aperiodic, and periodic-above-aperiodic power.
 7. **Visualization** — figures consume result structures and do not run hidden analysis.
 8. **Export** — tables, MAT files, figures, and a processing log with parameters and software information.
-9. **GUI** — a later MATLAB-native layer that calls the same public analysis functions.
+9. **GUI** — the MATLAB-native `LfpApp`/`launchLfpApp` layer. It owns import confirmation, parameter controls, run snapshots, cache/expiry status, result tabs and save actions, while calling the same public analysis functions as scripts.
 
 ## Dependency policy
 
@@ -19,11 +19,13 @@ The base path must not require Python, R, Java, Node.js, network access, or auto
 ## Data flow
 
 ```text
-CSV -> importer -> validated data model -> derived preprocessing
+CSV -> inspection/import confirmation -> validated data model -> derived preprocessing
     -> artifact annotations -> PSD/time-frequency -> parameterization
     -> bands/figures/tables/log -> export
 ```
 
 `analyzeLfpFolder` 在文件层面复用同一条流水线：扫描 `*.csv`，逐文件导入并识别 `Channel` 区块，随后一次性完成伪影、PSD、参数化和频段功率。结果按文件保存，通道始终以 samples × channels 矩阵和 `channelLabels` 传播，避免重复计算或跨文件混合通道。
+
+The GUI takes a run snapshot containing the selected channels, analysis range, module switches and a copied configuration. A successful run replaces the previous result atomically; a failed or cancelled run leaves the last successful result and raw data intact. Plot-only edits do not trigger analysis, while data/artifact/PSD/model/band edits invalidate their downstream caches.
 
 The raw signal remains in the data model and is never overwritten by a derived signal.
