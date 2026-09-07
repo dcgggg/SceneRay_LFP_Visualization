@@ -2,6 +2,8 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
+当前发布版本：**v0.6.1**。该版本修复了 GUI 导入后的信息栏和 PSD/FOOOF 结果表显示错误，并减少了 GUI 导入流程中的重复 CSV 读取。
+
 ## 目标
 
 - 读取 SceneRay 及通用 CSV LFP 数据；
@@ -81,6 +83,8 @@ GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分�
 
 GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出 band-power/processing-history CSV 和 PNG 总览图。自动保存选项使用带时间戳的子目录，不覆盖已有结果。
 
+v0.6.1 还包含以下 GUI 稳定性修复：CSV 预览、信息栏、伪迹事件表和频段结果表会将字符串/分类值转换为 `uitable` 可显示的字符值，但不会修改原始导入数据或分析结果表；确认导入时会复用已经完成预览的 CSV 内容，SceneRay 数据行解析也采用预分配方式以减少大文件导入耗时。
+
 默认伪迹处理使用逐通道的 native 检测，并启用严格短窗模式（`cfg.artifact.strictMode = true`）。严格模式按窗口内高于 `strictHighpassHz` 的 FFT 能量、导数能量和局部振幅范围检测持续突发，并将候选窗口之间不超过 `strictMergeGapSeconds` 的短间隙一并标记。原始 `data.signal` 始终保留；伪迹只写入 `artifactResult.channelMask`，显示副本 `cleanData.cleanedSignal` 将对应样本标为 `NaN`，不会自动把前后数据拼接或重建。40 Hz 及其 Nyquist 以下谐波默认不作为时间域伪迹删除，而是在频谱参数化的拟合副本中插值。若明确需要 FieldTrip，可设置 `cfg.artifact.method = "fieldtrip"`，但其时间区间会应用到所有通道。
 
 PSD 默认严格排除包含任意无效/伪迹样本的窗口（`cfg.psd.maxArtifactFraction = 0`），因此被标记的红色区间不会进入默认 PSD、参数化或频段功率分析。若明确需要允许少量污染，可将阈值改为正数（例如 `0.05`）；此时低于阈值的样本只在该 PSD 窗口内线性填补，并记录到 `filledSampleCount`。
@@ -116,6 +120,8 @@ end
 results = runtests('tests');
 assert(all([results.Passed]));
 ```
+
+v0.6.1 在 MATLAB R2024a 环境中通过全部 **43/43** 项自动化测试。测试运行时可能出现用户本机 FieldTrip 路径优先级提示；这些提示不属于项目测试失败。
 
 也可以检查入口：
 

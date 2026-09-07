@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Reserved for changes after v0.6.1.
+
+## [0.6.1] - 2026-09-07
+
+- Fixed native GUI import failure caused by assigning string scalars inside a `uitextarea.Value` cell array.
+- Added `lfp_table_to_uitable_data` so artifact, FOOOF and band-power result tables can display typed string/categorical values without changing analysis results.
+- Reused the CSV inspection result during GUI confirmation and preallocated SceneRay sample parsing to reduce large-file import overhead.
+- Added regression coverage for typed table display conversion and preloaded SceneRay import.
+
 - Added a MATLAB-native `launchLfpApp`/`LfpApp` GUI for CSV import confirmation, channel/time selection, configurable artifact/PSD/FOOOF/band/plot parameters, run snapshots, cache-expiry status, result tabs, redraw and save workflows.
 - Added `lfp_inspect_csv` and `lfp_import_csv_configured` for previewed generic CSV import while preserving the existing SceneRay block-aware importer.
 - Added GUI/import smoke tests and documented generic CSV orientation and uniform-sampling validation.
