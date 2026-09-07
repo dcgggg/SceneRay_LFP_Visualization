@@ -3,7 +3,8 @@ function [data, importInfo] = lfp_import_csv_configured(filename, options)
 %   DATA = LFP_IMPORT_CSV_CONFIGURED(FILENAME) uses conservative automatic
 %   suggestions from LFP_INSPECT_CSV.  DATA = ... (FILENAME, options) accepts
 %   HeaderRow, DataStartRow, TimeColumn, SignalColumns, SamplingRateHz,
-%   Units, AmplitudeScale, TimeUnit, Delimiter and DataDirection.  A GUI
+%   Units, AmplitudeScale, TimeUnit, Delimiter, DataDirection and an optional
+%   precomputed Inspection structure.  A GUI
 %   should show these values and let the user confirm them before calling.
 %
 %   The source file is never modified. Missing numeric cells remain NaN and
@@ -26,13 +27,19 @@ arguments
     options.AmplitudeScale (1,1) double = 1
     options.TimeUnit (1,1) string {mustBeMember(options.TimeUnit, ["s" "ms"])} = "s"
     options.UseSceneRay (1,1) logical = true
+    options.Inspection struct = struct()
 end
 
-inspection = lfp_inspect_csv(filename, Delimiter=options.Delimiter);
+inspection = options.Inspection;
+reuseInspection = ~isempty(fieldnames(inspection)) && isfield(inspection, 'delimiter') && ...
+    string(inspection.delimiter) == options.Delimiter && isfield(inspection, 'cells');
+if ~reuseInspection
+    inspection = lfp_inspect_csv(filename, Delimiter=options.Delimiter);
+end
 if inspection.isSceneRay && options.UseSceneRay
     fs = options.SamplingRateHz;
     if ~isfinite(fs) || fs <= 0, fs = 1000; end
-    data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units);
+    data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units, Cells=inspection.cells);
     data.metadata.sourceFilePath = filename;
     data.metadata.importSettings = struct('format', "SceneRay", 'delimiter', options.Delimiter, ...
         'headerRow', NaN, 'dataStartRow', NaN, 'timeColumn', 1, ...

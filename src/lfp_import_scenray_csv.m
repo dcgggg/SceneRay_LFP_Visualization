@@ -3,8 +3,9 @@ function data = lfp_import_scenray_csv(filename, options)
 %   DATA = LFP_IMPORT_SCENRAY_CSV(FILENAME) reads repeated SceneRay blocks
 %   containing metadata and Time Index / Voltage / Tag Code rows. Repeated
 %   blocks become columns in DATA.signal (samples x channels).
-%   DATA = LFP_IMPORT_SCENRAY_CSV(FILENAME, options) accepts SamplingRateHz
-%   and Units fields. The confirmed defaults are 1000 Hz and microvolts.
+%   DATA = LFP_IMPORT_SCENRAY_CSV(FILENAME, options) accepts SamplingRateHz,
+%   Units, and an optional preloaded Cells matrix. Passing Cells avoids a
+%   second disk read when the GUI has already inspected the file.
 %
 %   The source file is never modified. Non-numeric rows inside data blocks
 %   are skipped and counted in DATA.metadata.skippedDataRows. The original
@@ -14,16 +15,21 @@ arguments
     filename (1,1) string
     options.SamplingRateHz (1,1) double {mustBeFinite, mustBePositive} = 1000
     options.Units (1,1) string = "uV"
+    options.Cells cell = {}
 end
 
 if ~isfile(filename)
     error('LFP:FileNotFound', 'Input CSV does not exist: %s', filename);
 end
 
-try
-    cells = readcell(filename, 'FileType', 'text', 'Delimiter', ',');
-catch exception
-    error('LFP:CsvReadFailed', 'Could not read CSV %s: %s', filename, exception.message);
+if isempty(options.Cells)
+    try
+        cells = readcell(filename, 'FileType', 'text', 'Delimiter', ',');
+    catch exception
+        error('LFP:CsvReadFailed', 'Could not read CSV %s: %s', filename, exception.message);
+    end
+else
+    cells = options.Cells;
 end
 
 if isempty(cells) || size(cells, 2) < 2
@@ -190,10 +196,12 @@ end
 end
 
 function [timeIndex, signal, tags, skippedRows] = parse_signal_rows(cells, firstRow, lastRow)
-timeIndex = zeros(0, 1);
-signal = zeros(0, 1);
-tags = strings(0, 1);
+nRows = max(0, lastRow - firstRow + 1);
+timeIndex = zeros(nRows, 1);
+signal = zeros(nRows, 1);
+tags = strings(nRows, 1);
 skippedRows = 0;
+keptRows = 0;
 for rowIndex = firstRow:lastRow
     indexValue = to_number(cells{rowIndex, 1});
     signalValue = to_number(cells{rowIndex, 2});
@@ -203,14 +211,18 @@ for rowIndex = firstRow:lastRow
         end
         continue;
     end
-    timeIndex(end + 1, 1) = indexValue; %#ok<AGROW>
-    signal(end + 1, 1) = signalValue; %#ok<AGROW>
+    keptRows = keptRows + 1;
+    timeIndex(keptRows, 1) = indexValue;
+    signal(keptRows, 1) = signalValue;
     if size(cells, 2) >= 3
-        tags(end + 1, 1) = string_or_empty(cells{rowIndex, 3}); %#ok<AGROW>
+        tags(keptRows, 1) = string_or_empty(cells{rowIndex, 3});
     else
-        tags(end + 1, 1) = ""; %#ok<AGROW>
+        tags(keptRows, 1) = "";
     end
 end
+timeIndex = timeIndex(1:keptRows);
+signal = signal(1:keptRows);
+tags = tags(1:keptRows);
 end
 
 function value = normalize_token(raw)
