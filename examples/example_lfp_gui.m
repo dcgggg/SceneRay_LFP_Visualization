@@ -6,4 +6,3 @@ thisFile = mfilename('fullpath');
 projectRoot = fileparts(fileparts(thisFile));
 addpath(fullfile(projectRoot, 'src'));
 app = launchLfpApp(ProjectRoot=projectRoot); %#ok<NASGU>
-
