@@ -235,8 +235,14 @@ classdef LfpApp < handle
                     app.Controls.RunInfoLabel.Text = '完成';
                     app.Controls.RunInfoLabel.Tooltip = sprintf('完成：%d 个数据集 | 总耗时 %.3f s；详细阶段耗时见日志和保存结果。', ...
                         total, app.Performance.lastAnalysis.totalSeconds);
-                    if ~isempty(runErrors)
-                        app.LastRunError = strjoin(runErrors, newline);
+                    if ~isempty(runErrors) || strlength(app.LastRunError) > 0
+                        if ~isempty(runErrors)
+                            if strlength(app.LastRunError) > 0
+                                app.LastRunError = strjoin([runErrors; app.LastRunError], newline);
+                            else
+                                app.LastRunError = strjoin(runErrors, newline);
+                            end
+                        end
                         app.Controls.ResultStatusLabel.Text = '部分失败';
                         app.Controls.ResultStatusLabel.Tooltip = '部分数据集失败；成功数据集结果仍可查看，详情见日志。';
                     elseif strlength(app.LastPlotError) > 0
@@ -775,7 +781,10 @@ classdef LfpApp < handle
             if snapshot.modules.band, analysisData.processingHistory(end+1) = struct('operation', "band_power", 'parameters', snapshot.cfg.bands, 'notes', "Band powers computed from the GUI run PSD/model snapshot."); end
             if app.CancelRequested, return; end
             app.Config = snapshot.cfg; app.CleanData = fullClean; app.ArtifactResult = fullArtifact; app.AnalysisData = analysisData;
-            app.BeforePsd = beforePsd; app.PsdResult = psd; app.ModelResult = model; app.BandResult = band; app.LastRunSnapshot = snapshot; app.LastRunError = "";
+            app.BeforePsd = beforePsd; app.PsdResult = psd; app.ModelResult = model; app.BandResult = band; app.LastRunSnapshot = snapshot; 
+            if strlength(modelFailure) > 0
+                app.LastRunError = "specparam 失败：" + modelFailure;
+            end
             app.Cache = struct('artifactValid', ~isempty(fieldnames(fullArtifact)), 'psdValid', ~isempty(fieldnames(psd)), 'modelValid', ~isempty(model), 'bandValid', ~isempty(fieldnames(band)), 'plotValid', true);
             app.AppState.currentResults = struct('artifact', app.ArtifactResult, 'psd', app.PsdResult, 'model', {app.ModelResult}, 'band', app.BandResult);
             app.TaskManager.beginStage("Visualization " + datasetOrder + "/" + totalDatasets, stageOffset + 6, stageCount);
