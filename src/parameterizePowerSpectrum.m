@@ -1,5 +1,5 @@
 function modelResult = parameterizePowerSpectrum(freq, power, fooofCfg)
-%PARAMETERIZEPOWERSPECTRUM Fit fixed/no-knee aperiodic and Gaussian peaks.
+%PARAMETERIZEPOWERSPECTRUM Fit fixed/knee aperiodic and Gaussian peaks.
 %   MODELRESULT = PARAMETERIZEPOWERSPECTRUM(FREQ, POWER, CFG) accepts
 %   linear-frequency and linear-power arrays (frequency x channels). It
 %   excludes 0 Hz and non-positive/non-finite power, fits
@@ -20,8 +20,9 @@ for index = 1:numel(required)
         error('LFP:InvalidFooofConfig', 'fooofCfg.%s is required.', required{index});
     end
 end
-if lower(string(fooofCfg.aperiodicMode)) ~= "fixed"
-    error('LFP:UnsupportedAperiodicMode', 'Native parameterization currently supports only a fixed/no-knee mode.');
+mode = lower(string(fooofCfg.aperiodicMode));
+if ~ismember(mode, ["fixed" "knee"])
+    error('LFP:UnsupportedAperiodicMode', 'aperiodicMode must be fixed or knee.');
 end
 if numel(fooofCfg.frequencyRange) ~= 2 || fooofCfg.frequencyRange(2) <= fooofCfg.frequencyRange(1)
     error('LFP:InvalidFitRange', 'fooofCfg.frequencyRange must be increasing.');
@@ -41,22 +42,16 @@ if any(~isfinite(freq)) || any(diff(freq) <= 0) || any(freq < 0)
     error('LFP:InvalidSpectrum', 'FREQ must be finite, nonnegative and strictly increasing.');
 end
 
-% Keep the supplied PSD untouched.  The line-noise interpolation is applied
-% only to a fitting copy, matching fooof.utils.interpolate_spectrum semantics.
+% The PSD grid is used exactly as returned by the estimator.  In particular,
+% no line-noise interpolation, frequency densification, or gap filling is
+% performed here.  Legacy interpolation fields are accepted only so old
+% configurations remain loadable.
 fitPower = power;
+legacyInterpolation = isfield(fooofCfg, 'interpolateLineNoise');
 lineNoise = struct('enabled', false, 'interpolatedMask', false(numel(freq), 1), ...
-    'rangesHz', zeros(0, 2), 'method', "not applied");
-if get_field(fooofCfg, 'interpolateLineNoise', true)
-    fittingSpectrum = lfp_interpolate_line_noise(struct( ...
-        'frequencyHz', freq, 'psd', power), ...
-        LineFrequencyHz=get_field(fooofCfg, 'lineFrequencyHz', 40), ...
-        InterpolationHalfWidthHz=get_field(fooofCfg, 'lineInterpolationHalfWidthHz', 2), ...
-        BufferSamples=get_field(fooofCfg, 'lineInterpolationBufferSamples', 3), ...
-        IncludeHarmonics=get_field(fooofCfg, 'lineIncludeHarmonics', true));
-    fitPower = fittingSpectrum.psdForFitting;
-    lineNoise = fittingSpectrum.lineNoise;
-    lineNoise.enabled = true;
-end
+    'rangesHz', zeros(0, 2), 'method', "not applied", ...
+    'warning', ternary_text(legacyInterpolation, ...
+    "Legacy interpolateLineNoise ignored; PSD grid used without interpolation.", ""));
 frequencyResolution = median(diff(freq));
 fitRange = [max(fooofCfg.frequencyRange(1), min(freq(freq > 0))), ...
     min(fooofCfg.frequencyRange(2), freq(end))];
@@ -78,6 +73,7 @@ result.freq = freq;
 result.inputPower = inputPower;
 result.fittingPower = fittingPower;
 result.lineNoise = lineNoise;
+result.interpolationApplied = false;
 result.frequencyResolution = frequencyResolution;
 result.fitRange = fitRange;
 result.settings = cfg;
@@ -99,9 +95,16 @@ if nnz(valid) < 5
 end
 logFrequency = log10(freq(valid));
 logPower = log10(fittingPower(valid));
-[initialCoefficients, initialKeep] = robust_background(logFrequency, logPower, cfg.peakThreshold);
-initialAperiodicLog = initialCoefficients(1) + initialCoefficients(2) * log10(max(freq, eps));
-flattenedInitial = logPower - ([ones(nnz(valid), 1), logFrequency] * initialCoefficients);
+[initialParams, initialModelValid, initialKeep, initialOk, initialWarning] = ...
+    fit_aperiodic(freq(valid), logPower, cfg, cfg.peakThreshold);
+if ~initialOk
+    result.fitStatus = "failed";
+    result.warnings(end + 1) = initialWarning;
+    return;
+end
+if strlength(initialWarning) > 0, result.warnings(end + 1) = initialWarning; end
+initialAperiodicLog = evaluate_aperiodic(freq, initialParams, cfg);
+flattenedInitial = logPower - initialModelValid;
 threshold = max(cfg.minPeakHeight, cfg.peakThreshold * robust_scale(flattenedInitial));
 candidateIndices = find_candidates(freq(valid), flattenedInitial, threshold, ...
     get_field(cfg, 'minPeakDistanceHz', max(cfg.peakWidthLimits(1), 2 * frequencyResolution)));
@@ -118,14 +121,17 @@ for candidate = 1:numel(candidateIndices)
 end
 
 finalLogPower = logPower - gaussianLog;
-finalCoefficients = [ones(nnz(initialKeep), 1), logFrequency(initialKeep)] \ finalLogPower(initialKeep);
-if any(~isfinite(finalCoefficients))
-    finalCoefficients = initialCoefficients;
-    result.warnings(end + 1) = "Final aperiodic refit was ill-conditioned; initial fit retained.";
+[finalParams, ~, ~, finalOk, finalWarning] = ...
+    fit_aperiodic(freq(valid), finalLogPower, cfg, cfg.peakThreshold);
+if ~finalOk
+    result.fitStatus = "failed";
+    result.warnings(end + 1) = "Final aperiodic refit failed: " + finalWarning;
+    return;
 end
-offset = finalCoefficients(1);
-exponent = -finalCoefficients(2);
-aperiodicLog = offset - exponent * log10(max(freq, eps));
+if strlength(finalWarning) > 0, result.warnings(end + 1) = finalWarning; end
+offset = finalParams.offset;
+exponent = finalParams.exponent;
+aperiodicLog = evaluate_aperiodic(freq, finalParams, cfg);
 aperiodicFit = 10 .^ aperiodicLog;
 gaussianTotalLog = zeros(size(freq));
 for peakIndex = 1:numel(gaussianParams)
@@ -153,7 +159,7 @@ for index = 1:numel(gaussianParams)
 end
 result.logPower = NaN(size(freq));
 result.logPower(valid) = logPower;
-result.aperiodicParams = struct('offset', offset, 'exponent', exponent, 'mode', "fixed");
+result.aperiodicParams = finalParams;
 result.aperiodicFit = aperiodicFit;
 result.periodicFit = periodicFit;
 result.fullModelFit = fullModelFit;
@@ -168,6 +174,80 @@ if ~isfinite(rSquared) || ~isfinite(fitError)
     result.fitStatus = "failed";
     result.warnings(end + 1) = "Fit quality is not finite.";
 end
+end
+
+function [params, modelLog, keep, ok, warningText] = fit_aperiodic(freq, logPower, cfg, threshold)
+%FIT_APERIODIC Fit the selected native fixed or knee background model.
+freq = freq(:); logPower = logPower(:);
+logFrequency = log10(freq);
+[coefficients, keep] = robust_background(logFrequency, logPower, threshold);
+if nnz(keep) < 3
+    params = struct('offset', NaN, 'exponent', NaN, 'knee', NaN, ...
+        'mode', lower(string(cfg.aperiodicMode)));
+    modelLog = NaN(size(logPower)); ok = false;
+    warningText = "Aperiodic fit has fewer than three robust points.";
+    return;
+end
+mode = lower(string(cfg.aperiodicMode));
+if mode == "fixed"
+    params = struct('offset', coefficients(1), 'exponent', -coefficients(2), ...
+        'knee', NaN, 'mode', "fixed");
+    modelLog = evaluate_aperiodic(freq, params, cfg);
+    ok = all(isfinite(modelLog)); warningText = "";
+    if ~ok, warningText = "Fixed aperiodic model is non-finite."; end
+    return;
+end
+
+% Knee is estimated in log10(knee) coordinates to guarantee a positive knee
+% while allowing the fit to use only base MATLAB (fminsearch).
+initialExponent = max(0.05, min(8, -coefficients(2)));
+initialKnee = max((median(freq(keep)) / 2) .^ initialExponent, 1e-8);
+initialOffset = median(logPower(keep) + log10(initialKnee + freq(keep) .^ initialExponent));
+start = [initialOffset, initialExponent, log10(initialKnee)];
+objective = @(p) knee_objective(p, freq(keep), logPower(keep));
+options = optimset('Display', 'off', 'MaxIter', 2000, 'MaxFunEvals', 8000, ...
+    'TolX', 1e-7, 'TolFun', 1e-9);
+warningText = "";
+try
+    [fitParameters, ~, exitFlag] = fminsearch(objective, start, options);
+catch exception
+    fitParameters = [NaN NaN NaN]; exitFlag = -1;
+    warningText = "Knee optimizer error: " + string(exception.message);
+end
+if exitFlag <= 0 || any(~isfinite(fitParameters)) || fitParameters(2) <= 0
+    params = struct('offset', NaN, 'exponent', NaN, 'knee', NaN, 'mode', "knee");
+    modelLog = NaN(size(logPower)); ok = false;
+    if strlength(warningText) == 0, warningText = "Knee optimizer did not converge."; end
+    return;
+end
+params = struct('offset', fitParameters(1), 'exponent', fitParameters(2), ...
+    'knee', 10 .^ fitParameters(3), 'mode', "knee");
+modelLog = evaluate_aperiodic(freq, params, cfg);
+ok = all(isfinite(modelLog));
+if ~ok, warningText = "Knee aperiodic model is non-finite."; end
+end
+
+function value = knee_objective(parameters, freq, logPower)
+if numel(parameters) ~= 3 || any(~isfinite(parameters)) || parameters(2) <= 0 || ...
+        parameters(2) > 12 || parameters(3) < -12 || parameters(3) > 12
+    value = 1e12; return;
+end
+model = parameters(1) - log10(10 .^ parameters(3) + freq .^ parameters(2));
+residual = logPower - model;
+value = mean(residual .^ 2);
+if ~isfinite(value), value = 1e12; end
+end
+
+function modelLog = evaluate_aperiodic(freq, params, cfg)
+if lower(string(cfg.aperiodicMode)) == "knee"
+    modelLog = params.offset - log10(max(params.knee, realmin) + max(freq, eps) .^ params.exponent);
+else
+    modelLog = params.offset - params.exponent * log10(max(freq, eps));
+end
+end
+
+function value = ternary_text(condition, first, second)
+if condition, value = first; else, value = second; end
 end
 
 function [coefficients, keep] = robust_background(logFrequency, logPower, threshold)
@@ -229,8 +309,8 @@ end
 
 function result = empty_result()
 result = struct('freq', [], 'inputPower', [], 'logPower', [], ...
-    'fittingPower', [], 'lineNoise', struct('enabled', false), ...
-    'aperiodicParams', struct('offset', NaN, 'exponent', NaN, 'mode', "fixed"), ...
+    'fittingPower', [], 'lineNoise', struct('enabled', false), 'interpolationApplied', false, ...
+    'aperiodicParams', struct('offset', NaN, 'exponent', NaN, 'knee', NaN, 'mode', "fixed"), ...
     'aperiodicFit', [], 'periodicFit', [], 'fullModelFit', [], ...
     'flattenedSpectrum', [], 'peakParams', empty_peaks(), ...
     'gaussianParams', empty_gaussians(), 'rSquared', NaN, 'fitError', NaN, ...

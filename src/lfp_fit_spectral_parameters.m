@@ -1,8 +1,7 @@
 function data = lfp_fit_spectral_parameters(data, options)
 %LFP_FIT_SPECTRAL_PARAMETERS Fit fixed aperiodic and periodic spectra.
 %   DATA = LFP_FIT_SPECTRAL_PARAMETERS(DATA) fits
-%   log10(P)=offset-exponent*log10(f) to DATA.spectrum.psdForFitting (or
-%   DATA.spectrum.psd when no interpolation has been requested). Positive
+%   log10(P)=offset-exponent*log10(f) to DATA.spectrum.psd. Positive
 %   residual groups are reported as periodic peaks. Original PSD values,
 %   fitting PSD values, and all fit diagnostics are retained separately.
 
@@ -27,11 +26,9 @@ end
 spectrum = data.spectrum;
 frequencyHz = double(spectrum.frequencyHz(:));
 originalPsd = double(spectrum.psd);
-if isfield(spectrum, 'psdForFitting')
-    fittingPsd = double(spectrum.psdForFitting);
-else
-    fittingPsd = originalPsd;
-end
+% Legacy sessions may contain psdForFitting from the removed interpolation
+% path.  Ignore that field so the actual PSD grid is always fitted.
+fittingPsd = originalPsd;
 if ~isequal(size(originalPsd), size(fittingPsd)) || size(originalPsd, 1) ~= numel(frequencyHz)
     error('LFP:InvalidSpectrum', 'PSD arrays must have matching frequency dimensions.');
 end
@@ -116,7 +113,7 @@ parameters.settings = struct('robustIterations', options.RobustIterations, ...
 data.spectralParameters = parameters;
 entry = struct('operation', "fixed_spectral_parameterization", ...
     'parameters', parameters.settings, ...
-    'notes', "Aperiodic offset/exponent and periodic residuals kept separate; fitting PSD may be line-noise interpolated.");
+    'notes', "Aperiodic offset/exponent and periodic residuals kept separate; legacy fitting copies are ignored.");
 data.processingHistory(end + 1) = entry;
 end
 

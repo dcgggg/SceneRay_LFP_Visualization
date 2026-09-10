@@ -4,7 +4,7 @@ function cfg = lfpDefaultConfig()
 %   calling the analysis functions. No function reads user input dialogs.
 
 cfg = struct();
-cfg.version = "0.6.0";
+cfg.version = "0.7.0";
 cfg.artifact = struct();
 cfg.artifact.method = "native";
 cfg.artifact.nativeFallback = true;
@@ -42,24 +42,38 @@ cfg.psd.windowLengthSec = 4;
 cfg.psd.overlapFraction = 0.5;
 cfg.psd.nfft = 0;
 cfg.psd.taper = "hann";
+cfg.psd.detrend = "constant";
+cfg.psd.multitaper = struct('timeBandwidthProduct', 3.5, ...
+    'taperCount', floor(2 * 3.5) - 1, 'weighting', "equal");
 cfg.psd.frequencyRange = [1 40];
 cfg.psd.excludeArtifacts = true;
 cfg.psd.maxArtifactFraction = 0;
 cfg.psd.aggregationMethod = "mean";
+cfg.psd.timeFrequency = struct();
+cfg.psd.timeFrequency.enabled = true;
+cfg.psd.timeFrequency.reusePsdParameters = true;
+cfg.psd.timeFrequency.windowLengthSec = 1;
+cfg.psd.timeFrequency.stepSeconds = 0.25;
+cfg.psd.timeFrequency.nfft = 0;
+cfg.psd.timeFrequency.frequencyRange = [1 40];
+cfg.psd.timeFrequency.maxArtifactFraction = 0;
+cfg.psd.timeFrequency.powerScale = "log10";
+cfg.psd.timeFrequency.colorLimits = "auto";
+cfg.psd.timeFrequency.colorLimitsManual = [-5 1];
+cfg.psd.timeFrequency.colormap = "parula";
+cfg.psd.timeFrequency.baselineEnabled = false;
+cfg.psd.timeFrequency.baselineRangeSec = [0 0];
+cfg.psd.timeFrequency.multitaper = struct('timeBandwidthProduct', 3.5, ...
+    'taperCount', floor(2 * 3.5) - 1, 'weighting', "equal");
 
 cfg.fooof = struct();
-cfg.fooof.frequencyRange = [1 40];
+cfg.fooof.frequencyRange = [1 35];
 cfg.fooof.aperiodicMode = "fixed";
 cfg.fooof.peakWidthLimits = [2 12];
 cfg.fooof.maxNumberPeaks = 6;
 cfg.fooof.minPeakHeight = 0.10;
 cfg.fooof.peakThreshold = 2.5;
 cfg.fooof.fitErrorMetric = "rmse";
-cfg.fooof.interpolateLineNoise = true;
-cfg.fooof.lineFrequencyHz = 40;
-cfg.fooof.lineInterpolationHalfWidthHz = 2;
-cfg.fooof.lineInterpolationBufferSamples = 3;
-cfg.fooof.lineIncludeHarmonics = true;
 
 cfg.bands = struct();
 cfg.bands.delta = [1 4];
@@ -116,18 +130,22 @@ metadata(end+1) = item("psd.overlapFraction", cfg.psd.overlapFraction, "double",
     "Fractional overlap between adjacent windows.", "PSD");
 metadata(end+1) = item("psd.frequencyRange", cfg.psd.frequencyRange, "double", "Hz", [0 Inf], [], ...
     "Frequency range retained in the PSD result.", "PSD");
+metadata(end+1) = item("psd.method", cfg.psd.method, "string", "", [], ...
+    ["welch" "multitaper"], "PSD estimator. Multitaper uses DPSS tapers and never silently falls back to Welch.", "PSD");
+metadata(end+1) = item("psd.detrend", cfg.psd.detrend, "string", "", [], ...
+    ["none" "constant" "linear"], "Detrending applied independently to each valid window.", "PSD");
+metadata(end+1) = item("psd.multitaper.timeBandwidthProduct", cfg.psd.multitaper.timeBandwidthProduct, "double", "NW", [0.5 Inf], [], ...
+    "DPSS time-bandwidth product. Derived half-bandwidth is NW/T and total smoothing is approximately 2NW/T.", "PSD");
+metadata(end+1) = item("psd.multitaper.taperCount", cfg.psd.multitaper.taperCount, "double", "count", [1 Inf], [], ...
+    "Number of DPSS tapers; default floor(2*NW)-1.", "PSD");
+metadata(end+1) = item("psd.timeFrequency", cfg.psd.timeFrequency, "struct", "", [], [], ...
+    "Sliding-window time-frequency parameters. Invalid windows remain NaN and time gaps are not compressed.", "PSD");
 metadata(end+1) = item("psd.maxArtifactFraction", cfg.psd.maxArtifactFraction, "double", "fraction", [0 1], [], ...
     "Maximum invalid/artifact fraction accepted in a PSD window when exclusion is enabled.", "PSD");
 metadata(end+1) = item("fooof.frequencyRange", cfg.fooof.frequencyRange, "double", "Hz", [0 Inf], [], ...
     "Frequency range used for fixed/no-knee parameterization.", "Spectral model");
 metadata(end+1) = item("fooof.aperiodicMode", cfg.fooof.aperiodicMode, "string", "", [], ...
-    ["fixed" "knee"], "Aperiodic model selection; current native implementation supports fixed.", "Spectral model");
-metadata(end+1) = item("fooof.interpolateLineNoise", cfg.fooof.interpolateLineNoise, "logical", "", [0 1], [], ...
-    "Interpolate line-noise harmonics in a fitting copy only; original PSD is retained.", "Spectral model");
-metadata(end+1) = item("fooof.lineFrequencyHz", cfg.fooof.lineFrequencyHz, "double", "Hz", [eps Inf], [], ...
-    "Line-noise fundamental used for fitting-only interpolation.", "Spectral model");
-metadata(end+1) = item("fooof.lineInterpolationHalfWidthHz", cfg.fooof.lineInterpolationHalfWidthHz, "double", "Hz", [0 Inf], [], ...
-    "Half-width of each interpolation range around line-noise harmonics.", "Spectral model");
+    ["fixed" "knee"], "Aperiodic model selection for native MATLAB specparam (original FOOOF naming retained for compatibility).", "Spectral model");
 metadata(end+1) = item("fooof.peakWidthLimits", cfg.fooof.peakWidthLimits, "double", "Hz", [0 Inf], [], ...
     "Lower/upper Gaussian bandwidth limits; lower bound is checked against frequency resolution.", "Spectral model");
 metadata(end+1) = item("fooof.maxNumberPeaks", cfg.fooof.maxNumberPeaks, "double", "count", [1 Inf], [], ...

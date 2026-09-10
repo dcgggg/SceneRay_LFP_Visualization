@@ -22,11 +22,13 @@ verifyEqual(testCase, result.peakParams.BW, 3, 'AbsTol', 1.5);
 verifyEqual(testCase, result.gaussianParams.sigmaHz, result.peakParams.BW/2, 'AbsTol', 1e-12);
 end
 
-function testRejectsKneeAndNonpositivePower(testCase)
+function testSupportsKneeAndNonpositivePower(testCase)
 ensure_src_on_path(testCase);
 cfg = lfpDefaultConfig();
 cfg.fooof.aperiodicMode = "knee";
-verifyError(testCase, @() parameterizePowerSpectrum((1:10)', ones(10,1), cfg.fooof), 'LFP:UnsupportedAperiodicMode');
+resultKnee = parameterizePowerSpectrum((1:10)', ones(10,1), cfg.fooof);
+verifyEqual(testCase, resultKnee.aperiodicParams.mode, "knee");
+verifyTrue(testCase, isfield(resultKnee.aperiodicParams, 'knee'));
 cfg.fooof.aperiodicMode = "fixed";
 power = ones(10,1); power(5) = 0;
 result = parameterizePowerSpectrum((1:10)', power, cfg.fooof);
@@ -45,7 +47,7 @@ verifyEqual(testCase, numel(result(1).aperiodicFit), numel(freq));
 verifyEqual(testCase, numel(result(2).aperiodicFit), numel(freq));
 end
 
-function testInterpolatesLineNoiseOnlyInFittingCopy(testCase)
+function testDoesNotInterpolateLineNoise(testCase)
 ensure_src_on_path(testCase);
 cfg = lfpDefaultConfig();
 freq = (1:0.25:100)';
@@ -54,10 +56,11 @@ power = base;
 power(abs(freq-40) <= 2) = power(abs(freq-40) <= 2) * 100;
 power(abs(freq-80) <= 2) = power(abs(freq-80) <= 2) * 100;
 result = parameterizePowerSpectrum(freq, power, cfg.fooof);
-verifyTrue(testCase, result.lineNoise.enabled);
-verifyTrue(testCase, any(result.lineNoise.interpolatedMask));
+verifyFalse(testCase, result.lineNoise.enabled);
+verifyFalse(testCase, any(result.lineNoise.interpolatedMask));
 verifyEqual(testCase, result.inputPower, power);
-verifyTrue(testCase, any(abs(result.fittingPower - power) > 0));
+verifyEqual(testCase, result.fittingPower, power);
+verifyFalse(testCase, result.interpolationApplied);
 end
 
 function ensure_src_on_path(testCase)

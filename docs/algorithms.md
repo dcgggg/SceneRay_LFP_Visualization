@@ -4,7 +4,7 @@ This document records the implemented MATLAB definitions and their limits.
 
 ## Interference
 
-The current project assumption is 40 Hz device/line interference and integer harmonics below Nyquist. The fundamental frequency and interpolation width are explicit parameters, not hidden defaults. Line noise is retained in the time-domain signal and PSD; by default it is not added to the artifact mask, because it is interpolated only in the fitting copy before spectral parameterization. This is not treated as stimulation artifact.
+The current project assumption is 40 Hz device/line interference and integer harmonics below Nyquist. Line noise is retained in the time-domain signal and PSD and is not treated as stimulation artifact. The current specparam path performs no fitting-time interpolation or frequency-grid densification; legacy interpolation fields are ignored with a migration warning.
 
 ## Artifact policy
 
@@ -12,25 +12,25 @@ Artifacts are represented as sample masks, channel masks and an events table. Th
 
 ## PSD and bands
 
-PSD units are signal-unit-squared per Hz. PSD is computed from artifact-aware windows, with per-window PSD and per-frequency valid-window counts saved. `cfg.psd.maxArtifactFraction` controls the tolerated invalid/artifact fraction; the default 0 rejects any window containing an invalid sample, so marked intervals do not enter the default spectral analysis. A positive value explicitly permits a small contaminated fraction and linearly fills only that accepted fraction, recorded in `filledSampleCount`. Input power is linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
+PSD units are signal-unit-squared per Hz. Welch uses one-sided FFT windows. Multitaper uses K true DPSS tapers per continuous valid window, equal taper weighting, and records `NW`, `K`, `W=NW/T`, total smoothing bandwidth, window count and per-frequency valid-window counts. `cfg.psd.maxArtifactFraction` controls tolerated invalid/artifact samples; default 0 rejects contaminated windows. Input power remains linear; log10 conversion occurs only inside model fitting or display. Band power is the integral of a selected PSD interval. Total (`totalPower`), log total (`logTotalPower`), relative, aperiodic and periodic-above-aperiodic quantities remain separate. Bands outside the PSD range return NaN.
 
 ## Aperiodic and periodic components
 
-The native model is fixed/no-knee: `L(F)=offset-exponent*log10(F)`, so exponent is the negative log-log slope and no knee is fitted. The implementation performs robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. 40-Hz harmonics remain in the original PSD and are interpolated only in a fitting copy before the robust fit; `modelResult.inputPower` is raw and `modelResult.fittingPower` is the interpolated copy. Set `cfg.fooof.interpolateLineNoise=false` to disable this step.
+The native model supports fixed/no-knee `L(F)=offset-exponent*log10(F)` and knee `L(F)=offset-log10(knee+F^exponent)`. Knee is estimated in positive log10(knee) coordinates with a base-MATLAB optimizer; it is not a user-supplied Hz breakpoint. Both modes perform robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. `modelResult.inputPower` and `modelResult.fittingPower` are the same un-interpolated PSD grid.
 
-`lfp_interpolate_line_noise` reproduces the documented `fooof.utils.interpolate_spectrum` behavior: each closed range uses averaged buffer samples on both sides and linear interpolation in log-log spacing. With the defaults, ranges are 38–42, 78–82, and so on up to Nyquist. The original `spectrum.psd` is never replaced.
+`lfp_interpolate_line_noise` remains as a standalone legacy/reference utility for compatibility with older sessions, but it is not called by the current parameterization path. New analyses therefore retain 40-Hz harmonics in both `inputPower` and `fittingPower` and report their influence rather than silently modifying the fit grid.
 
 Implemented functions:
 
 - `lfp_preprocess`: robust amplitude, derivative/step and saturation marking; optional NaN processing copy.
-- `lfp_compute_psd`: manual Welch PSD with artifact-heavy window rejection.
-- `lfp_prepare_spectrum_for_fitting`: fitting-only line-noise interpolation with processing history.
-- `lfp_fit_spectral_parameters`: fixed offset/exponent and residual peak detection.
+- `lfp_compute_psd`: manual Welch or DPSS Multitaper PSD with artifact-heavy window rejection.
+- `lfp_dpss`, `lfp_compute_multitaper_psd`: base-MATLAB DPSS generation and multitaper implementation.
+- `lfp_fit_spectral_parameters`: legacy fixed offset/exponent path; fitting-only interpolation fields are ignored.
 - `lfp_compute_band_power`: total, relative, aperiodic and periodic-above-aperiodic integrations.
-- `lfp_compute_time_frequency`: artifact-aware manual STFT.
+- `lfp_compute_time_frequency`: artifact-aware sliding STFT/Welch or sliding DPSS time-frequency power.
 - `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
 - `detectAndHandleArtifacts`, `computeLfpPsd`, `parameterizePowerSpectrum`, `computeBandPower`: stable cfg-based entry points for future GUI use.
-- `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`, `plotAnalysisSummary`: independent before/after and model-result plots.
+- `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`: independent before/after, dot/facet and model-result plots. The GUI no longer creates the legacy summary tab.
 
 Plot functions return figure/layout/axes handles and accept an optional `plotCfg.parent` Figure, panel, or tab. Artifact comparison places Raw and Clean/display (NaN-marked) panels vertically for each channel, using the same y-limits for each before/after pair. It also includes raw versus finite masked amplitude distributions, per-channel artifact fractions, and event-count/total-duration summaries by artifact type. Figures default to a 1600×1100-pixel canvas and 300-DPI export; adjust `cfg.plot.figurePosition`, `cfg.plot.tileSpacing`, and `cfg.plot.exportResolution` as needed. Batch plotting can retain interactive windows with `KeepFiguresOpen=true`.
 
