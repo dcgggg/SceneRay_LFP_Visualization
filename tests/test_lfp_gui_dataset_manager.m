@@ -23,7 +23,6 @@ verifyEqual(testCase, app.AppState.selectedDatasets, [1 2]);
 app.Controls.ArtifactCheck.Value = false;
 app.Controls.FooofCheck.Value = false;
 app.Controls.BandCheck.Value = false;
-app.Controls.TfEnable.Value = false;
 app.onRun([], []);
 verifyTrue(testCase, app.Cache.psdValid);
 verifyEqual(testCase, string(app.Datasets(1).status), "已完成");

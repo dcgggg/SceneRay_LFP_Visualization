@@ -71,7 +71,6 @@ app.setData(fixture_data(4, 2));
 app.Controls.ArtifactCheck.Value = false;
 app.Controls.FooofCheck.Value = false;
 app.Controls.BandCheck.Value = false;
-app.Controls.TfEnable.Value = false;
 app.onRun([], []);
 verifyTrue(testCase, app.Cache.psdValid);
 verifyTrue(testCase, contains(string(app.Controls.ResultStatusLabel.Text), "成功"));
