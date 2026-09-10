@@ -744,7 +744,11 @@ classdef LfpApp < handle
                     end
                 end
             end
-            app.TaskManager.finishStage("completed");
+            if strlength(modelFailure) > 0
+                app.TaskManager.finishStage("failed");
+            else
+                app.TaskManager.finishStage("completed");
+            end
 
             app.TaskManager.beginStage("Band power " + datasetOrder + "/" + totalDatasets, stageOffset + 5, stageCount);
             if snapshot.modules.band
