@@ -179,9 +179,9 @@ classdef LfpApp < handle
             app.CancelRequested = false;
             app.LastRunError = "";
             app.LastPlotError = "";
-            app.Controls.ResultStatusLabel.Text = '运行中';
+            app.Controls.ResultStatusLabel.Text = '运行';
             app.Controls.ResultStatusLabel.Tooltip = '结果状态：运行中；取消将在当前计算块结束后生效。';
-            app.Controls.RunInfoLabel.Text = '运行中';
+            app.Controls.RunInfoLabel.Text = '运行';
             app.Controls.RunInfoLabel.Tooltip = '正在运行所选分析；详细阶段进度显示在顶部状态区和日志中。';
             stageCountPerDataset = 6;
             app.TaskManager.start(numel(datasetIndices) * stageCountPerDataset);
@@ -207,7 +207,7 @@ classdef LfpApp < handle
                     app.Controls.RunInfoLabel.Tooltip = sprintf('完成：%d 个数据集 | 总耗时 %.3f s；详细阶段耗时见日志和保存结果。', ...
                         total, app.Performance.lastAnalysis.totalSeconds);
                     if strlength(app.LastPlotError) > 0
-                        app.Controls.ResultStatusLabel.Text = '绘图失败';
+                        app.Controls.ResultStatusLabel.Text = '失败';
                         app.Controls.ResultStatusLabel.Tooltip = '分析成功；绘图失败，但当前数值结果已保存。';
                     else
                         app.Controls.ResultStatusLabel.Text = '成功';
@@ -221,7 +221,7 @@ classdef LfpApp < handle
                 if strcmp(exception.identifier, 'LFP:UserCancelled')
                     app.LastRunError = "";
                     app.setStatus("本次运行已取消；上一份成功结果仍保留。", "warning");
-                    app.Controls.ResultStatusLabel.Text = '已取消';
+                    app.Controls.ResultStatusLabel.Text = '取消';
                     app.Controls.ResultStatusLabel.Tooltip = '结果状态：已取消；上一份成功结果仍保留。';
                     app.logMessage("用户取消了本次运行。", "warning");
                 else
@@ -1314,14 +1314,14 @@ classdef LfpApp < handle
                 case "model", app.Cache.modelValid=false; app.Cache.bandValid=false;
                 case "band", app.Cache.bandValid=false;
             end
-            app.Controls.ResultStatusLabel.Text = '待重算';
+            app.Controls.ResultStatusLabel.Text = '待算';
             app.Controls.ResultStatusLabel.Tooltip = '结果状态：' + string(message);
             app.setStatus(message, 'warning');
         end
 
         function invalidateAll(app, message)
             app.Cache = struct('artifactValid', false, 'psdValid', false, 'modelValid', false, 'bandValid', false, 'plotValid', false);
-            app.Controls.ResultStatusLabel.Text = '待重算';
+            app.Controls.ResultStatusLabel.Text = '待算';
             app.Controls.ResultStatusLabel.Tooltip = '结果状态：' + string(message);
             app.setStatus(message, 'warning');
         end
@@ -1496,7 +1496,7 @@ classdef LfpApp < handle
                 app.renderActiveResult();
             catch exception
                 app.LastPlotError = string(exception.message);
-                app.Controls.ResultStatusLabel.Text = '绘图失败';
+                app.Controls.ResultStatusLabel.Text = '失败';
                 app.Controls.ResultStatusLabel.Tooltip = '分析结果存在，但当前绘图失败；请查看日志。';
                 app.logMessage("结果绘图失败：" + string(exception.message), "error");
                 app.showError("结果绘图失败", exception);
