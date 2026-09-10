@@ -74,11 +74,42 @@ app.Controls.BandCheck.Value = false;
 app.Controls.TfEnable.Value = false;
 app.onRun([], []);
 verifyTrue(testCase, app.Cache.psdValid);
+verifyTrue(testCase, contains(string(app.Controls.ResultStatusLabel.Text), "成功"));
+verifyFalse(testCase, contains(string(app.Controls.ResultStatusLabel.Text), "失败"));
 verifyTrue(testCase, isfield(app.AnalysisData.metadata, 'performance'));
 app.onRun([], []);
 messages = string(app.Controls.LogArea.Value);
 verifyTrue(testCase, any(contains(messages, "PSD：使用有效缓存")));
 verifyTrue(testCase, isfield(app.Performance, 'lastAnalysis'));
+end
+
+function testGuiLayoutAndResultSelectionRemainAccessible(testCase)
+ensure_src_on_path(testCase);
+app = launchLfpApp(Visible="off");
+testCase.addTeardown(@()delete(app));
+% Verify the fixed operation area and the three main columns survive common
+% window sizes without losing their controls.  MATLAB lays out the grids on
+% drawnow, so this also exercises the resize path rather than only checking
+% object construction.
+sizes = [960 650; 1280 800; 1920 1080];
+for k = 1:size(sizes, 1)
+    app.Figure.Position = [40 40 sizes(k, :)];
+    drawnow;
+    verifyGreaterThan(testCase, app.Controls.OuterGrid.Position(3), 0);
+    verifyGreaterThan(testCase, app.Controls.ToolbarGrid.Position(3), 0);
+    verifyTrue(testCase, isgraphics(app.Controls.RunButton));
+    verifyTrue(testCase, isgraphics(app.Controls.CancelButton));
+    verifyTrue(testCase, isgraphics(app.Controls.RedrawButton));
+end
+
+data = fixture_data(2, 2);
+app.setData(data);
+app.Controls.ChannelList.Value = cellstr(data.channelLabels);
+app.Controls.PsdChannelDropDown.Value = char(data.channelLabels(2));
+app.onResultChannelChanged(app.Controls.PsdChannelDropDown, []);
+% Selecting a result channel must not change the channels selected for the
+% next run.
+verifyEqual(testCase, string(app.Controls.ChannelList.Value), string(data.channelLabels));
 end
 
 function data = fixture_data(seconds, channels)

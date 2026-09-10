@@ -44,6 +44,16 @@ verifyEqual(testCase, height(app.BandResult.table), 12);
 verifyTrue(testCase, app.Cache.psdValid);
 verifyTrue(testCase, app.Cache.modelValid);
 verifyTrue(testCase, app.Cache.bandValid);
+% Selecting the specparam tab must render the separated model and peak views
+% without re-running analysis or creating placeholder legend entries.
+tabs = app.Tabs.Results.Children;
+specTab = tabs(contains(string({tabs.Title}), "specparam"));
+app.Tabs.Results.SelectedTab = specTab;
+drawnow;
+verifyTrue(testCase, isgraphics(app.Controls.FooofModelAxes));
+verifyTrue(testCase, isgraphics(app.Controls.FooofPeaksAxes));
+verifyTrue(testCase, isgraphics(app.Controls.FooofTable));
+verifyEqual(testCase, string(app.LastPlotError), "");
 end
 
 function ensure_src_on_path(testCase)
