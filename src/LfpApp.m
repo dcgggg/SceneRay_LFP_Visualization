@@ -1262,6 +1262,11 @@ classdef LfpApp < handle
 
         function renderRaw(app)
             if isempty(fieldnames(app.Data)), return; end
+            datasetIndices = app.selectedDatasetIndices();
+            if numel(datasetIndices) > 1 && isfield(app.Controls, 'RawOverlayMode') && string(app.Controls.RawOverlayMode.Value) == "叠加"
+                app.renderRawOverlay(datasetIndices);
+                return;
+            end
             d=app.Data; channels=app.selectedChannels(); if isempty(channels), return; end
             r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value];
             if isfield(d, 'time') && numel(d.time) == size(d.signal, 1) && all(isfinite(d.time)) && all(diff(d.time) > 0)
@@ -1285,6 +1290,43 @@ classdef LfpApp < handle
             cla(app.Controls.CleanAxes); plot(app.Controls.CleanAxes,t,clean,'LineWidth',0.7); hold(app.Controls.CleanAxes,'on'); if displayArtifactMatches, app.addArtifactPatches(app.Controls.CleanAxes,idx,rawLimits,t); end; hold(app.Controls.CleanAxes,'off');
             title(app.Controls.CleanAxes, app.displayTitle("Clean/display (artifact samples = NaN)"), 'Interpreter','none'); xlabel(app.Controls.CleanAxes,'Time (s)'); ylabel(app.Controls.CleanAxes,"Signal ("+string(d.units)+")"); app.Controls.CleanAxes.YLim=rawLimits; grid(app.Controls.CleanAxes,'on'); legend(app.Controls.CleanAxes,cellstr(string(d.channelLabels(channels))),'Interpreter','none','Location','best');
             app.updateArtifactTable();
+        end
+
+        function renderRawOverlay(app, datasetIndices)
+            if isempty(datasetIndices), return; end
+            currentLabels=string(app.Data.channelLabels(:)); channel=app.channelIndexFromControl(app.Controls.RawChannelDropDown,currentLabels);
+            r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value]; rawSeries=cell(numel(datasetIndices),1); cleanSeries=cell(numel(datasetIndices),1); timeSeries=cell(numel(datasetIndices),1); names=strings(numel(datasetIndices),1); allValues=[];
+            for k=1:numel(datasetIndices)
+                entry=app.Datasets(datasetIndices(k)); names(k)=entry.fileName; idx=app.indicesForDisplay(entry,r); if isempty(idx), continue; end
+                channelIndex=min(channel,size(entry.signal,2)); timeSeries{k}=entry.time(idx); rawSeries{k}=entry.signal(idx,channelIndex); cleanSeries{k}=rawSeries{k};
+                results=entry.analysisResults;
+                if isfield(results,'artifactResult') && isstruct(results.artifactResult) && isfield(results.artifactResult,'channelMask') && size(results.artifactResult.channelMask,1)>=max(idx) && size(results.artifactResult.channelMask,2)>=channelIndex
+                    mask=results.artifactResult.channelMask(idx,channelIndex); cleanSeries{k}(mask)=NaN;
+                end
+                allValues=[allValues; rawSeries{k}(isfinite(rawSeries{k}))]; %#ok<AGROW>
+            end
+            if isempty(allValues), return; end
+            limits=app.finiteLimits(allValues); colors=lines(numel(datasetIndices));
+            cla(app.Controls.RawAxes); hold(app.Controls.RawAxes,'on'); cla(app.Controls.CleanAxes); hold(app.Controls.CleanAxes,'on');
+            for k=1:numel(datasetIndices)
+                if isempty(timeSeries{k}), continue; end
+                plot(app.Controls.RawAxes,timeSeries{k},rawSeries{k},'Color',colors(k,:),'DisplayName',names(k),'LineWidth',0.7);
+                plot(app.Controls.CleanAxes,timeSeries{k},cleanSeries{k},'Color',colors(k,:),'DisplayName',names(k),'LineWidth',0.7);
+            end
+            hold(app.Controls.RawAxes,'off'); hold(app.Controls.CleanAxes,'off');
+            for ax=[app.Controls.RawAxes app.Controls.CleanAxes]
+                ax.YLim=limits; xlabel(ax,'Time (s)'); ylabel(ax,"Signal ("+string(app.Data.units)+")"); grid(ax,'on'); legend(ax,'Location','best','Interpreter','none');
+            end
+            title(app.Controls.RawAxes,'Raw overlay | selected datasets','Interpreter','none'); title(app.Controls.CleanAxes,'Clean overlay | artifact samples = NaN','Interpreter','none'); app.updateArtifactTable();
+        end
+
+        function idx = indicesForDisplay(app, entry, range)
+            if numel(entry.time) == size(entry.signal,1) && all(isfinite(entry.time)) && all(diff(entry.time)>0)
+                idx=find(entry.time>=range(1) & entry.time<=range(2));
+            else
+                first=max(1,floor(range(1)*entry.fs)+1); last=min(size(entry.signal,1),ceil(range(2)*entry.fs)); idx=first:last;
+            end
+            if isfinite(app.Controls.PlotMaxSeconds.Value) && ~isempty(idx), idx=idx(1:min(numel(idx),max(1,round(app.Controls.PlotMaxSeconds.Value*entry.fs)))); end
         end
 
         function ensureSinglePsdAxes(app)
