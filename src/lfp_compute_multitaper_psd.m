@@ -43,7 +43,6 @@ filledSampleCount = zeros(1, nChannels);
 artifactMask = false(nSamples, nChannels);
 if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask') && ...
         isequal(size(data.artifacts.channelMask), size(signal))
-        
     artifactMask = logical(data.artifacts.channelMask);
 end
 
