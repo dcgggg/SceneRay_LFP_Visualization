@@ -781,7 +781,7 @@ classdef LfpApp < handle
             if snapshot.modules.band, analysisData.processingHistory(end+1) = struct('operation', "band_power", 'parameters', snapshot.cfg.bands, 'notes', "Band powers computed from the GUI run PSD/model snapshot."); end
             if app.CancelRequested, return; end
             app.Config = snapshot.cfg; app.CleanData = fullClean; app.ArtifactResult = fullArtifact; app.AnalysisData = analysisData;
-            app.BeforePsd = beforePsd; app.PsdResult = psd; app.ModelResult = model; app.BandResult = band; app.LastRunSnapshot = snapshot; 
+            app.BeforePsd = beforePsd; app.PsdResult = psd; app.ModelResult = model; app.BandResult = band; app.LastRunSnapshot = snapshot;
             if strlength(modelFailure) > 0
                 app.LastRunError = "specparam 失败：" + modelFailure;
             end
