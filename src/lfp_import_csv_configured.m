@@ -41,6 +41,9 @@ if inspection.isSceneRay && options.UseSceneRay
     if ~isfinite(fs) || fs <= 0, fs = 1000; end
     data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units, Cells=inspection.cells);
     data.metadata.sourceFilePath = filename;
+    data.metadata.timeSource = "generated_from_sampling_rate";
+    data.metadata.timeUnitConversion = "sample index / fs -> seconds";
+    data.metadata.originalColumnNames = string(inspection.preview(1, :));
     data.metadata.importSettings = struct('format', "SceneRay", 'delimiter', options.Delimiter, ...
         'headerRow', NaN, 'dataStartRow', NaN, 'timeColumn', 1, ...
         'signalColumns', 2, 'dataDirection', "samples_by_channels", ...
@@ -170,6 +173,14 @@ metadata.signalColumns = signalColumns;
 metadata.ignoredColumns = setdiff(1:nColumns, [timeColumn signalColumns]);
 metadata.dataDirection = options.DataDirection;
 metadata.timeUnit = options.TimeUnit;
+metadata.timeSource = ternary_text(timeColumn > 0, "csv", "generated_from_sampling_rate");
+metadata.timeUnitConversion = ternary_text(timeColumn > 0 && options.TimeUnit == "ms", ...
+    "milliseconds / 1000 -> seconds", "values already in seconds");
+if headerRow >= 1 && headerRow <= nRows
+    metadata.originalColumnNames = string(cells(headerRow, :));
+else
+    metadata.originalColumnNames = "column_" + string(1:nColumns);
+end
 metadata.timeValidation = timeValidation;
 metadata.estimatedSamplingRateHz = estimatedFs;
 metadata.amplitudeScale = options.AmplitudeScale;
@@ -202,6 +213,10 @@ importInfo.actualDataStartRow = dataStartRow;
 importInfo.actualTimeColumn = timeColumn;
 importInfo.actualSignalColumns = signalColumns;
 importInfo.actualSamplingRateHz = fs;
+end
+
+function value = ternary_text(condition, first, second)
+if condition, value = first; else, value = second; end
 end
 
 function [estimatedFs, validation] = validate_time_values(timeValues)

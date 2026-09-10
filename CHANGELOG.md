@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Reserved for changes after v0.6.1.
+- Incremental local development after v0.6.1; no remote release or push performed in this task.
+- Added configurable DPSS Multitaper PSD and sliding STFT/DPSS time-frequency outputs.
+- Added native fixed/knee specparam parameterization and removed fitting-time interpolation.
+- Updated GUI labels to specparam（原FOOOF）, added method/multitaper/time-frequency controls, replaced band heatmap with dot facets, and removed the legacy 摘要 tab.
+- Added import metadata for time source/unit conversion and a confirmation dialog for sampling-rate disagreement.
 
 ## [0.6.1] - 2026-09-07
 

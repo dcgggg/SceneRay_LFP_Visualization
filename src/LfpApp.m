@@ -70,7 +70,11 @@ classdef LfpApp < handle
                 elseif isfield(loaded, 'config'), candidate = loaded.config;
                 else, error('LFP:ConfigNotFound', 'MAT 文件中没有 cfg 或 config 变量。');
                 end
+                legacyInterpolation = isfield(candidate, 'fooof') && isfield(candidate.fooof, 'interpolateLineNoise');
                 app.Config = app.mergeConfig(lfpDefaultConfig(), candidate);
+                if legacyInterpolation
+                    app.logMessage("旧配置中的拟合前插值选项已忽略；specparam直接使用PSD频率网格。", "warning");
+                end
                 app.populateControlsFromConfig();
                 app.invalidateAll("配置已加载，已有结果需要重新运行。");
                 app.logMessage("已加载配置：" + string(file), "info");
@@ -189,11 +193,13 @@ classdef LfpApp < handle
                 band = struct();
                 if needPsd
                     app.setProgress(0.35, "计算 PSD");
+                    psdCfgBefore = snapshot.cfg.psd;
+                    if isfield(psdCfgBefore, 'timeFrequency'), psdCfgBefore.timeFrequency.enabled = false; end
                     if snapshot.modules.artifact || needArtifact
                         emptyForBefore = app.emptyArtifact(analysisData);
-                        beforePsd = computeLfpPsd(analysisData, emptyForBefore, snapshot.cfg.psd);
+                        beforePsd = computeLfpPsd(analysisData, emptyForBefore, psdCfgBefore);
                     else
-                        beforePsd = computeLfpPsd(analysisData, app.emptyArtifact(analysisData), snapshot.cfg.psd);
+                        beforePsd = computeLfpPsd(analysisData, app.emptyArtifact(analysisData), psdCfgBefore);
                     end
                     app.checkCancellation();
                     psd = computeLfpPsd(analysisClean, analysisArtifact, snapshot.cfg.psd);
@@ -229,7 +235,7 @@ classdef LfpApp < handle
                 end
                 if needModel
                     analysisData.processingHistory(end + 1) = struct('operation', "spectral_parameterization", ...
-                        'parameters', snapshot.cfg.fooof, 'notes', "Fixed/no-knee periodic and aperiodic model fitted in GUI run.");
+                        'parameters', snapshot.cfg.fooof, 'notes', "Native specparam periodic and aperiodic model fitted in GUI run.");
                 end
                 if snapshot.modules.band
                     analysisData.processingHistory(end + 1) = struct('operation', "band_power", ...
@@ -369,7 +375,7 @@ classdef LfpApp < handle
             modulePanel = uipanel(lg, 'Title', '分析模块'); mg = uigridlayout(modulePanel, [4 1]);
             app.Controls.ArtifactCheck = uicheckbox(mg, 'Text', '伪迹检测/标记', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('artifact'));
             app.Controls.PsdCheck = uicheckbox(mg, 'Text', 'PSD', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('psd'));
-            app.Controls.FooofCheck = uicheckbox(mg, 'Text', 'FOOOF 风格周期/非周期拟合', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('model'));
+            app.Controls.FooofCheck = uicheckbox(mg, 'Text', 'specparam（原FOOOF）周期/非周期拟合', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('model'));
             app.Controls.BandCheck = uicheckbox(mg, 'Text', '频段功率', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('band'));
             autoPanel = uipanel(lg, 'BorderType', 'none'); ag = uigridlayout(autoPanel, [1 1]);
             app.Controls.AutoSaveCheck = uicheckbox(ag, 'Text', '运行成功后自动保存到输出目录', 'Value', false);
@@ -412,20 +418,31 @@ classdef LfpApp < handle
             app.Controls.ArtifactReconstruct.Enable = 'off';
             app.Controls.ArtifactMethodStatus = uilabel(g, 'Text', ''); app.Controls.ArtifactMethodStatus.Layout.Row = 12; app.Controls.ArtifactMethodStatus.Layout.Column = [1 3];
 
-            psdTab = uitab(tabs, 'Title', 'PSD');
-            g = uigridlayout(psdTab, [10 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 10);
-            app.Controls.PsdWindow = app.addNumeric(g, 1, '窗长 (s)', app.Config.psd.windowLengthSec, 'psd');
-            app.Controls.PsdOverlap = app.addNumeric(g, 2, '重叠比例', app.Config.psd.overlapFraction, 'psd');
-            app.Controls.PsdNfft = app.addNumeric(g, 3, 'NFFT（0=自动）', app.Config.psd.nfft, 'psd');
-            app.Controls.PsdFreqLow = app.addNumeric(g, 4, 'PSD 下限 (Hz)', app.Config.psd.frequencyRange(1), 'psd');
-            app.Controls.PsdFreqHigh = app.addNumeric(g, 5, 'PSD 上限 (Hz)', app.Config.psd.frequencyRange(2), 'psd');
-            app.Controls.PsdMaxArtifact = app.addNumeric(g, 6, '允许伪迹比例', app.Config.psd.maxArtifactFraction, 'psd');
-            app.Controls.PsdExclude = app.addCheck(g, 7, '排除含伪迹窗口', app.Config.psd.excludeArtifacts, 'psd');
-            app.Controls.PsdAggregation = app.addDropDown(g, 8, '窗口聚合', {'mean', 'median'}, char(app.Config.psd.aggregationMethod), 'psd');
-            label = uilabel(g, 'Text', 'PSD 为线性功率；显示时可转 dB'); label.Layout.Row = 9; label.Layout.Column = [1 3];
-            app.Controls.PsdInfo = uilabel(g, 'Text', ''); app.Controls.PsdInfo.Layout.Row = 10; app.Controls.PsdInfo.Layout.Column = [1 3];
+            psdTab = uitab(tabs, 'Title', 'PSD + 时频');
+            g = uigridlayout(psdTab, [20 2]); g.ColumnWidth = {180, '1x'}; g.RowHeight = repmat({26}, 1, 20);
+            app.Controls.PsdMethod = app.addDropDown(g, 1, 'PSD 方法', {'welch', 'multitaper'}, char(app.Config.psd.method), 'psd');
+            app.Controls.PsdWindow = app.addNumeric(g, 2, '窗长 T (s)', app.Config.psd.windowLengthSec, 'psd');
+            app.Controls.PsdOverlap = app.addNumeric(g, 3, '重叠比例', app.Config.psd.overlapFraction, 'psd');
+            app.Controls.PsdNfft = app.addNumeric(g, 4, 'NFFT（0=自动）', app.Config.psd.nfft, 'psd');
+            app.Controls.PsdFreqLow = app.addNumeric(g, 5, 'PSD 下限 (Hz)', app.Config.psd.frequencyRange(1), 'psd');
+            app.Controls.PsdFreqHigh = app.addNumeric(g, 6, 'PSD 上限 (Hz)', app.Config.psd.frequencyRange(2), 'psd');
+            app.Controls.PsdMaxArtifact = app.addNumeric(g, 7, '允许伪迹比例', app.Config.psd.maxArtifactFraction, 'psd');
+            app.Controls.PsdExclude = app.addCheck(g, 8, '排除含伪迹窗口', app.Config.psd.excludeArtifacts, 'psd');
+            app.Controls.PsdAggregation = app.addDropDown(g, 9, '窗口聚合', {'mean', 'median'}, char(app.Config.psd.aggregationMethod), 'psd');
+            app.Controls.PsdNW = app.addNumeric(g, 10, 'Multitaper NW', app.Config.psd.multitaper.timeBandwidthProduct, 'psd');
+            app.Controls.PsdK = app.addNumeric(g, 11, 'DPSS taper K', app.Config.psd.multitaper.taperCount, 'psd');
+            label = uilabel(g, 'Text', 'W=NW/T；总平滑带宽≈2W；默认 K=floor(2NW)-1'); label.Layout.Row = 12; label.Layout.Column = [1 3];
+            label = uilabel(g, 'Text', 'PSD 为线性功率；显示时可转 dB'); label.Layout.Row = 13; label.Layout.Column = [1 3];
+            tf = get_field_local(app.Config.psd, 'timeFrequency', struct());
+            app.Controls.TfEnable = app.addCheck(g, 14, '启用时频图', get_field_local(tf, 'enabled', true), 'psd');
+            app.Controls.TfReuse = app.addCheck(g, 15, '时频复用 PSD 参数', get_field_local(tf, 'reusePsdParameters', true), 'psd');
+            app.Controls.TfWindow = app.addNumeric(g, 16, '时频窗长 (s)', get_field_local(tf, 'windowLengthSec', 1), 'psd');
+            app.Controls.TfStep = app.addNumeric(g, 17, '时频步长 (s)', get_field_local(tf, 'stepSeconds', .25), 'psd');
+            label = uilabel(g, 'Text', '步长为主要输入；重叠比例由窗长与步长派生'); label.Layout.Row = 18; label.Layout.Column = [1 3];
+            app.Controls.TfPowerScale = app.addDropDown(g, 19, '时频功率', {'linear', 'log10', 'dB'}, char(get_field_local(tf, 'powerScale', "log10")), 'plot');
+            app.Controls.PsdInfo = uilabel(g, 'Text', ''); app.Controls.PsdInfo.Layout.Row = 20; app.Controls.PsdInfo.Layout.Column = [1 3];
 
-            fooofTab = uitab(tabs, 'Title', 'FOOOF');
+            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）');
             g = uigridlayout(fooofTab, [10 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 10);
             app.Controls.FooofFreqLow = app.addNumeric(g, 1, '拟合下限 (Hz)', app.Config.fooof.frequencyRange(1), 'model');
             app.Controls.FooofFreqHigh = app.addNumeric(g, 2, '拟合上限 (Hz)', app.Config.fooof.frequencyRange(2), 'model');
@@ -434,12 +451,12 @@ classdef LfpApp < handle
             app.Controls.FooofMaxPeaks = app.addNumeric(g, 5, '最大峰数', app.Config.fooof.maxNumberPeaks, 'model');
             app.Controls.FooofMinHeight = app.addNumeric(g, 6, '最小峰高 (log10)', app.Config.fooof.minPeakHeight, 'model');
             app.Controls.FooofThreshold = app.addNumeric(g, 7, '峰检测阈值 (z)', app.Config.fooof.peakThreshold, 'model');
-            app.Controls.FooofInterpolate = app.addCheck(g, 8, '拟合前插值 40 Hz 谐波', app.Config.fooof.interpolateLineNoise, 'model');
-            label = uilabel(g, 'Text', '模式：fixed / no-knee（native MATLAB）'); label.Layout.Row = 9; label.Layout.Column = [1 3];
+            app.Controls.FooofMode = app.addDropDown(g, 8, '非周期模型', {'fixed', 'knee'}, char(app.Config.fooof.aperiodicMode), 'model');
+            label = uilabel(g, 'Text', 'fixed: offset/exponent；knee: 额外估计 knee（非 Hz 拐点）'); label.Layout.Row = 9; label.Layout.Column = [1 3];
             app.Controls.FooofInfo = uilabel(g, 'Text', ''); app.Controls.FooofInfo.Layout.Row = 10; app.Controls.FooofInfo.Layout.Column = [1 3];
 
             bandTab = uitab(tabs, 'Title', '频段');
-            bg = uigridlayout(bandTab, [3 3]); bg.RowHeight = {'1x', 32, 28}; bg.ColumnWidth = {'1x', 90, 90};
+            bg = uigridlayout(bandTab, [4 3]); bg.RowHeight = {'1x', 32, 28, 28}; bg.ColumnWidth = {'1x', 120, 120};
             app.Controls.BandTable = uitable(bg, 'ColumnName', {'名称', '下限 (Hz)', '上限 (Hz)'}, ...
                 'ColumnEditable', [true true true], 'CellEditCallback', @(s,e)app.onBandCellEdit(s,e));
             app.Controls.BandTable.Layout.Row = 1; app.Controls.BandTable.Layout.Column = [1 3];
@@ -448,10 +465,13 @@ classdef LfpApp < handle
             app.Controls.BandTable.Data = bandData;
             app.Controls.BandMetric = uidropdown(bg, 'Items', {'totalPower', 'relativePower', 'logTotalPower', 'aperiodicPower', 'periodicPower'}, ...
                 'Value', 'totalPower', 'ValueChangedFcn', @(s,e)app.markChanged('plot')); app.Controls.BandMetric.Layout.Row = 2; app.Controls.BandMetric.Layout.Column = 1;
+            app.Controls.BandFacet = uidropdown(bg, 'Items', {'按频段分面', '按通道分面'}, ...
+                'Value', '按频段分面', 'ValueChangedFcn', @(s,e)app.markChanged('plot')); app.Controls.BandFacet.Layout.Row = 2; app.Controls.BandFacet.Layout.Column = 2;
             app.Controls.BandAddButton = uibutton(bg, 'Text', '添加', 'ButtonPushedFcn', @(s,e)app.addBand(s,e)); app.Controls.BandAddButton.Layout.Row = 2; app.Controls.BandAddButton.Layout.Column = 2;
             app.Controls.BandRemoveButton = uibutton(bg, 'Text', '删除', 'ButtonPushedFcn', @(s,e)app.removeBand(s,e)); app.Controls.BandRemoveButton.Layout.Row = 2; app.Controls.BandRemoveButton.Layout.Column = 3;
             app.Controls.BandDefaultsButton = uibutton(bg, 'Text', '恢复默认', 'ButtonPushedFcn', @(s,e)app.restoreDefaultBands(s,e)); app.Controls.BandDefaultsButton.Layout.Row = 3; app.Controls.BandDefaultsButton.Layout.Column = 1;
-            label = uilabel(bg, 'Text', '背景校正功率与原始总功率分开保存'); label.Layout.Row = 3; label.Layout.Column = [2 3];
+            label = uilabel(bg, 'Text', '点=一个通道/频段汇总值；不伪造误差条'); label.Layout.Row = 3; label.Layout.Column = [2 3];
+            label = uilabel(bg, 'Text', '背景校正功率与原始总功率分开保存'); label.Layout.Row = 4; label.Layout.Column = [1 3];
 
             plotTab = uitab(tabs, 'Title', '绘图');
             g = uigridlayout(plotTab, [8 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 8);
@@ -462,7 +482,7 @@ classdef LfpApp < handle
             app.Controls.PlotPowerScale = app.addDropDown(g, 5, '功率轴', {'linear', 'log10', 'dB'}, char(app.Config.plot.powerScale), 'plot');
             app.Controls.PlotShowLabels = app.addCheck(g, 6, '显示伪迹标签', app.Config.plot.showArtifactLabels, 'plot');
             app.Controls.PlotFontSize = app.addNumeric(g, 7, '字体大小', app.Config.plot.fontSize, 'plot');
-            label = uilabel(g, 'Text', '绘图范围独立于 PSD/FOOOF/频段计算范围'); label.Layout.Row = 8; label.Layout.Column = [1 3];
+            label = uilabel(g, 'Text', '绘图范围独立于 PSD/specparam/频段计算范围'); label.Layout.Row = 8; label.Layout.Column = [1 3];
         end
 
         function buildResultTabs(app, parent)
@@ -473,23 +493,21 @@ classdef LfpApp < handle
             app.Controls.CleanAxes = uiaxes(g); title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
             app.Controls.ArtifactTable = uitable(g, 'ColumnName', {'artifactType','startSample','endSample','startTime','endTime','channel','score','threshold','method'});
 
-            psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [2 1]); g.RowHeight = {'1x', 70};
+            psdTab = uitab(tabs, 'Title', 'PSD + 时频'); g = uigridlayout(psdTab, [4 1]); g.RowHeight = {28, '1x', '1x', 70};
+            app.Controls.PsdTFRChannel = uidropdown(g, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
             app.Controls.PsdAxes = uiaxes(g); grid(app.Controls.PsdAxes, 'on');
+            app.Controls.PsdTimeFrequencyAxes = uiaxes(g); grid(app.Controls.PsdTimeFrequencyAxes, 'on');
             app.Controls.PsdInfoResult = uitextarea(g, 'Editable', 'off', 'Value', {'尚未计算 PSD'});
 
-            fooofTab = uitab(tabs, 'Title', 'FOOOF'); g = uigridlayout(fooofTab, [2 1]); g.RowHeight = {'1x', 170};
+            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [2 1]); g.RowHeight = {'1x', 170};
             app.Controls.FooofAxes = uiaxes(g); grid(app.Controls.FooofAxes, 'on');
             app.Controls.FooofTable = uitable(g, 'ColumnName', {'CF_Hz','PW_log10','BW_Hz','peakBand'});
 
             bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [2 1]); g.RowHeight = {'1x', 170};
-            app.Controls.BandAxes = uiaxes(g); grid(app.Controls.BandAxes, 'on');
+            app.Controls.BandPlotPanel = uipanel(g, 'BorderType', 'none');
+            app.Controls.BandAxes = uiaxes(app.Controls.BandPlotPanel); app.Controls.BandAxes.Position = [10 10 500 300]; grid(app.Controls.BandAxes, 'on');
             app.Controls.BandResultTable = uitable(g);
-
-            summaryTab = uitab(tabs, 'Title', '摘要'); g = uigridlayout(summaryTab, [2 2]); g.RowHeight = {'1x', '1x'}; g.ColumnWidth = {'1x', '1x'};
-            app.Controls.SummaryPsdAxes = uiaxes(g); grid(app.Controls.SummaryPsdAxes, 'on');
-            app.Controls.SummaryFitAxes = uiaxes(g); grid(app.Controls.SummaryFitAxes, 'on');
-            app.Controls.SummaryBandAxes = uiaxes(g); grid(app.Controls.SummaryBandAxes, 'on');
-            app.Controls.SummaryArtifactAxes = uiaxes(g); grid(app.Controls.SummaryArtifactAxes, 'on');
         end
 
         function control = addNumeric(app, grid, row, labelText, value, stage)
@@ -571,8 +589,20 @@ classdef LfpApp < handle
                 if isfinite(fs) && isfield(data.metadata, 'estimatedSamplingRateHz') && ...
                         isfinite(data.metadata.estimatedSamplingRateHz) && ...
                         abs(fs - data.metadata.estimatedSamplingRateHz) / max(data.metadata.estimatedSamplingRateHz, eps) > 0.01
-                    controls.status.Text = '输入采样率与时间列估计值差异超过 1%，请复核。';
-                    app.logMessage("输入采样率与时间列估计值不一致，请复核导入设置。", "warning");
+                    estimated = data.metadata.estimatedSamplingRateHz;
+                    choice = uiconfirm(dialog, sprintf('输入采样率 %.6g Hz 与时间列估计值 %.6g Hz 相差超过 1%%。请选择如何保存。', fs, estimated), ...
+                        '采样率不一致', 'Options', {'保留输入值', '使用估计值', '取消导入'}, 'DefaultOption', 1, 'CancelOption', 3);
+                    if strcmp(choice, '取消导入'), return; end
+                    if strcmp(choice, '使用估计值')
+                        data.fs = estimated;
+                        data.metadata.samplingRateHz = estimated;
+                        data.metadata.importSettings.samplingRateHz = estimated;
+                        data.metadata.samplingRateDecision = "time_column_estimate";
+                    else
+                        data.metadata.samplingRateDecision = "user_confirmed_input";
+                    end
+                    controls.status.Text = '采样率差异已由用户确认并记录。';
+                    app.logMessage("时间列估计采样率与输入值不同，已记录用户选择。", "warning");
                 end
                 app.setData(data);
                 uiresume(dialog);
@@ -638,17 +668,26 @@ classdef LfpApp < handle
             cfg.psd.windowLengthSec = app.Controls.PsdWindow.Value;
             cfg.psd.overlapFraction = app.Controls.PsdOverlap.Value;
             cfg.psd.nfft = app.Controls.PsdNfft.Value;
+            cfg.psd.method = string(app.Controls.PsdMethod.Value);
+            cfg.psd.detrend = "constant";
+            cfg.psd.multitaper.timeBandwidthProduct = app.Controls.PsdNW.Value;
+            cfg.psd.multitaper.taperCount = app.Controls.PsdK.Value;
+            cfg.psd.multitaper.weighting = "equal";
             cfg.psd.frequencyRange = [app.Controls.PsdFreqLow.Value app.Controls.PsdFreqHigh.Value];
             cfg.psd.maxArtifactFraction = app.Controls.PsdMaxArtifact.Value;
             cfg.psd.excludeArtifacts = logical(app.Controls.PsdExclude.Value);
             cfg.psd.aggregationMethod = string(app.Controls.PsdAggregation.Value);
+            cfg.psd.timeFrequency.enabled = logical(app.Controls.TfEnable.Value);
+            cfg.psd.timeFrequency.reusePsdParameters = logical(app.Controls.TfReuse.Value);
+            cfg.psd.timeFrequency.windowLengthSec = app.Controls.TfWindow.Value;
+            cfg.psd.timeFrequency.stepSeconds = app.Controls.TfStep.Value;
+            cfg.psd.timeFrequency.powerScale = string(app.Controls.TfPowerScale.Value);
             cfg.fooof.frequencyRange = [app.Controls.FooofFreqLow.Value app.Controls.FooofFreqHigh.Value];
             cfg.fooof.peakWidthLimits = [app.Controls.FooofWidthLow.Value app.Controls.FooofWidthHigh.Value];
             cfg.fooof.maxNumberPeaks = app.Controls.FooofMaxPeaks.Value;
             cfg.fooof.minPeakHeight = app.Controls.FooofMinHeight.Value;
             cfg.fooof.peakThreshold = app.Controls.FooofThreshold.Value;
-            cfg.fooof.aperiodicMode = "fixed";
-            cfg.fooof.interpolateLineNoise = logical(app.Controls.FooofInterpolate.Value);
+            cfg.fooof.aperiodicMode = string(app.Controls.FooofMode.Value);
             cfg.bands = app.readBandsFromTable();
             cfg.plot.frequencyRange = [app.Controls.PlotFreqLow.Value app.Controls.PlotFreqHigh.Value];
             cfg.plot.maxPlotSeconds = app.Controls.PlotMaxSeconds.Value;
@@ -672,12 +711,23 @@ classdef LfpApp < handle
             app.Controls.ArtifactHighpass.Value = cfg.artifact.strictHighpassHz; app.Controls.ArtifactStrictHFZ.Value = cfg.artifact.strictHighFrequencyZ;
             app.Controls.ArtifactStrictDerivativeZ.Value = cfg.artifact.strictDerivativeZ; app.Controls.ArtifactStrictRangeZ.Value = cfg.artifact.strictRangeZ;
             app.Controls.ArtifactLineNoise.Value = cfg.artifact.lineNoiseDetection;
+            app.Controls.PsdMethod.Value = char(get_field_local(cfg.psd, 'method', "welch"));
             app.Controls.PsdWindow.Value = cfg.psd.windowLengthSec; app.Controls.PsdOverlap.Value = cfg.psd.overlapFraction; app.Controls.PsdNfft.Value = cfg.psd.nfft;
+            mt = get_field_local(cfg.psd, 'multitaper', struct());
+            app.Controls.PsdNW.Value = get_field_local(mt, 'timeBandwidthProduct', 3.5);
+            app.Controls.PsdK.Value = get_field_local(mt, 'taperCount', floor(2 * app.Controls.PsdNW.Value) - 1);
             app.Controls.PsdFreqLow.Value = cfg.psd.frequencyRange(1); app.Controls.PsdFreqHigh.Value = cfg.psd.frequencyRange(2); app.Controls.PsdMaxArtifact.Value = cfg.psd.maxArtifactFraction;
             app.Controls.PsdExclude.Value = cfg.psd.excludeArtifacts; app.Controls.PsdAggregation.Value = char(cfg.psd.aggregationMethod);
+            tf = get_field_local(cfg.psd, 'timeFrequency', struct());
+            app.Controls.TfEnable.Value = get_field_local(tf, 'enabled', true);
+            app.Controls.TfReuse.Value = get_field_local(tf, 'reusePsdParameters', true);
+            app.Controls.TfWindow.Value = get_field_local(tf, 'windowLengthSec', 1);
+            app.Controls.TfStep.Value = get_field_local(tf, 'stepSeconds', .25);
+            app.Controls.TfPowerScale.Value = char(get_field_local(tf, 'powerScale', "log10"));
             app.Controls.FooofFreqLow.Value = cfg.fooof.frequencyRange(1); app.Controls.FooofFreqHigh.Value = cfg.fooof.frequencyRange(2);
             app.Controls.FooofWidthLow.Value = cfg.fooof.peakWidthLimits(1); app.Controls.FooofWidthHigh.Value = cfg.fooof.peakWidthLimits(2); app.Controls.FooofMaxPeaks.Value = cfg.fooof.maxNumberPeaks;
-            app.Controls.FooofMinHeight.Value = cfg.fooof.minPeakHeight; app.Controls.FooofThreshold.Value = cfg.fooof.peakThreshold; app.Controls.FooofInterpolate.Value = cfg.fooof.interpolateLineNoise;
+            app.Controls.FooofMinHeight.Value = cfg.fooof.minPeakHeight; app.Controls.FooofThreshold.Value = cfg.fooof.peakThreshold;
+            app.Controls.FooofMode.Value = char(get_field_local(cfg.fooof, 'aperiodicMode', "fixed"));
             names = fieldnames(cfg.bands); bd = cell(numel(names), 3); for k = 1:numel(names), bd{k,1}=names{k}; bd{k,2}=cfg.bands.(names{k})(1); bd{k,3}=cfg.bands.(names{k})(2); end; app.Controls.BandTable.Data=bd;
             app.Controls.PlotFreqLow.Value = cfg.plot.frequencyRange(1); app.Controls.PlotFreqHigh.Value = cfg.plot.frequencyRange(2); app.Controls.PlotMaxSeconds.Value = cfg.plot.maxPlotSeconds;
             app.Controls.PlotFreqScale.Value = char(cfg.plot.frequencyScale); app.Controls.PlotPowerScale.Value = char(cfg.plot.powerScale); app.Controls.PlotShowLabels.Value = cfg.plot.showArtifactLabels; app.Controls.PlotFontSize.Value = cfg.plot.fontSize;
@@ -772,13 +822,29 @@ classdef LfpApp < handle
                 if snapshot.cfg.psd.frequencyRange(2) > app.Data.fs/2
                     error('LFP:PsdAboveNyquist', 'PSD 上限不能超过 Nyquist 频率 %.6g Hz。', app.Data.fs/2);
                 end
+                if string(snapshot.cfg.psd.method) == "multitaper"
+                    nw = snapshot.cfg.psd.multitaper.timeBandwidthProduct;
+                    k = snapshot.cfg.psd.multitaper.taperCount;
+                    if nw <= 0.5 || nw >= snapshot.cfg.psd.windowLengthSec * app.Data.fs / 2
+                        error('LFP:InvalidDPSS', 'Multitaper NW 必须大于0.5且小于窗口样本数的一半。');
+                    end
+                    if k < 1 || k > floor(snapshot.cfg.psd.windowLengthSec * app.Data.fs)
+                        error('LFP:InvalidDPSS', 'DPSS taper K 超出有效范围。');
+                    end
+                end
             end
             if snapshot.modules.fooof || snapshot.modules.band
                 if snapshot.cfg.fooof.frequencyRange(2) > snapshot.cfg.psd.frequencyRange(2)
-                    error('LFP:FooofOutsidePsd', 'FOOOF 拟合上限不能超过 PSD 上限。');
+                    error('LFP:FooofOutsidePsd', 'specparam 拟合上限不能超过 PSD 上限。');
                 end
             end
             if snapshot.modules.band && isempty(fieldnames(snapshot.cfg.bands)), error('LFP:InvalidBands', '至少选择一个频段。'); end
+            tf = get_field_local(snapshot.cfg.psd, 'timeFrequency', struct());
+            if (snapshot.modules.psd || snapshot.modules.fooof || snapshot.modules.band) && get_field_local(tf, 'enabled', false)
+                if ~get_field_local(tf, 'reusePsdParameters', true) && get_field_local(tf, 'stepSeconds', 0) <= 0
+                    error('LFP:InvalidTimeFrequency', '时频步长必须为正。');
+                end
+            end
         end
 
         function selected = selectChannels(~, data, channels)
@@ -793,7 +859,12 @@ classdef LfpApp < handle
         end
 
         function sliced = sliceData(~, data, index)
-            sliced = data; sliced.signal = data.signal(index, :); sliced.time = (0:numel(index)-1)' / data.fs;
+            sliced = data; sliced.signal = data.signal(index, :);
+            if isfield(data, 'time') && numel(data.time) >= max(index)
+                sliced.time = double(data.time(index));
+            else
+                sliced.time = (index(:) - 1) / data.fs;
+            end
             if isfield(data, 'cleanedSignal') && isequal(size(data.cleanedSignal), size(data.signal)), sliced.cleanedSignal = data.cleanedSignal(index, :); end
         end
 
@@ -844,7 +915,7 @@ classdef LfpApp < handle
         end
 
         function renderAll(app)
-            app.renderRaw(); app.renderPsd(); app.renderFooof(); app.renderBand(); app.renderSummary();
+            app.renderRaw(); app.renderPsd(); app.renderFooof(); app.renderBand();
         end
 
         function renderRaw(app)
@@ -853,7 +924,8 @@ classdef LfpApp < handle
             r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value];
             first=max(1,floor(r(1)*d.fs)+1); last=min(size(d.signal,1),ceil(r(2)*d.fs));
             if isfinite(app.Controls.PlotMaxSeconds.Value), last=min(last, first+max(1,round(app.Controls.PlotMaxSeconds.Value*d.fs))-1); end
-            idx=first:last; t=(idx-1)'/d.fs;
+            idx=first:last;
+            if isfield(d, 'time') && numel(d.time) >= last, t=double(d.time(idx)); else, t=(idx-1)'/d.fs; end
             raw=d.signal(idx,channels); clean=raw;
             displayArtifactMatches = ~isempty(fieldnames(app.ArtifactResult)) && isfield(app.ArtifactResult, 'channelIndices') && isequal(app.ArtifactResult.channelIndices(:)', channels(:)');
             if displayArtifactMatches && ~isempty(fieldnames(app.CleanData)) && isfield(app.CleanData,'cleanedSignal') && size(app.CleanData.cleanedSignal,1)>=last && size(app.CleanData.cleanedSignal,2)==numel(channels)
@@ -886,14 +958,33 @@ classdef LfpApp < handle
         end
 
         function renderPsd(app)
-            cla(app.Controls.PsdAxes); if isempty(fieldnames(app.PsdResult)), app.Controls.PsdInfoResult.Value={'尚未计算 PSD'}; return; end
+            cla(app.Controls.PsdAxes); cla(app.Controls.PsdTimeFrequencyAxes);
+            if isempty(fieldnames(app.PsdResult)), app.Controls.PsdInfoResult.Value={'尚未计算 PSD'}; return; end
             p=app.PsdResult; ch=app.selectedChannels(); ch=ch(ch<=size(p.psd,2)); if isempty(ch), ch=1:size(p.psd,2); end;
             freq=p.frequencyHz; before=app.BeforePsd; hold(app.Controls.PsdAxes,'on');
             [afterValues, powerLabel] = app.displayPower(p.psd(:,ch));
             if ~isempty(fieldnames(before)) && isfield(before,'psd') && isequal(size(before.psd),size(p.psd)), [beforeValues, ~] = app.displayPower(before.psd(:,ch)); app.plotSpectrum(app.Controls.PsdAxes, freq, beforeValues, ':', [0.6 0.6 0.6], 'Before artifact exclusion'); end
             app.plotSpectrum(app.Controls.PsdAxes, freq, afterValues, '-', [0.1 0.25 0.8], 'After artifact exclusion'); hold(app.Controls.PsdAxes,'off');
             app.applyFrequencyLimits(app.Controls.PsdAxes, freq); xlabel(app.Controls.PsdAxes,'Frequency (Hz)'); ylabel(app.Controls.PsdAxes,powerLabel); title(app.Controls.PsdAxes, app.displayTitle('PSD')); grid(app.Controls.PsdAxes,'on'); legend(app.Controls.PsdAxes,'Location','best');
-            app.Controls.PsdInfoResult.Value={sprintf('频率点：%d | Δf=%.6g Hz',numel(freq),p.frequencyResolutionHz),sprintf('有效窗口：%s',mat2str(p.windowCount)),sprintf('PSD 范围：[%.3g %.3g] Hz；功率单位：%s',freq(1),freq(end),p.psdUnits)};
+            if isfield(p, 'timeFrequency') && isstruct(p.timeFrequency) && isfield(p.timeFrequency, 'power')
+                tf = p.timeFrequency;
+                labels = string(p.channelLabels(:));
+                if isempty(labels), labels = "channel_" + string(1:size(tf.power,3)); end
+                app.Controls.PsdTFRChannel.Items = cellstr(labels);
+                selectedLabel = string(app.Controls.PsdTFRChannel.Value);
+                tfChannel = find(labels == selectedLabel, 1); if isempty(tfChannel), tfChannel = 1; app.Controls.PsdTFRChannel.Value = char(labels(1)); end
+                values = tf.power(:, :, min(tfChannel, size(tf.power,3)));
+                if string(get_field_local(tf, 'powerScale', "linear")) == "log10", values = log10(max(values, realmin));
+                elseif string(get_field_local(tf, 'powerScale', "linear")) == "dB", values = 10*log10(max(values, realmin)); end
+                imagesc(app.Controls.PsdTimeFrequencyAxes, tf.timeSeconds, tf.frequencyHz, values);
+                axis(app.Controls.PsdTimeFrequencyAxes, 'xy'); colorbar(app.Controls.PsdTimeFrequencyAxes);
+                xlabel(app.Controls.PsdTimeFrequencyAxes,'Time (s)'); ylabel(app.Controls.PsdTimeFrequencyAxes,'Frequency (Hz)');
+                title(app.Controls.PsdTimeFrequencyAxes, sprintf('时频功率 | %s | %s', labels(tfChannel), tf.method), 'Interpreter','none');
+                app.applyFrequencyLimits(app.Controls.PsdTimeFrequencyAxes, tf.frequencyHz);
+            else
+                title(app.Controls.PsdTimeFrequencyAxes, '时频结果未计算');
+            end
+            app.Controls.PsdInfoResult.Value={sprintf('方法：%s | 频率点：%d | Δf=%.6g Hz',p.method,numel(freq),p.frequencyResolutionHz),sprintf('有效窗口：%s',mat2str(p.windowCount)),sprintf('PSD 范围：[%.3g %.3g] Hz；功率单位：%s',freq(1),freq(end),p.psdUnits)};
         end
 
         function renderFooof(app)
@@ -905,24 +996,41 @@ classdef LfpApp < handle
             if any(isfinite(m.periodicFit)), [periodicValues, ~] = app.displayPower(m.aperiodicFit+m.periodicFit); app.plotSpectrum(app.Controls.FooofAxes,f,periodicValues,':',[0.1 0.6 0.1],'Periodic-inclusive'); end
             xline(app.Controls.FooofAxes,m.fitRange,':','Color',[.4 .4 .4]);
             if ~isempty(m.peakParams), centers=[m.peakParams.CF]; xline(app.Controls.FooofAxes,centers,'--','Color',[.1 .6 .1]); end
-            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | status=%s | offset %.3f | exponent %.3f | R² %.3f | error %.3f',app.displayTitle('FOOOF'),m.fitStatus,m.aperiodicParams.offset,m.aperiodicParams.exponent,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best'); grid(app.Controls.FooofAxes,'on');
+            kneeText = '';
+            if isfield(m.aperiodicParams, 'knee') && isfinite(m.aperiodicParams.knee), kneeText = sprintf(' | knee %.4g', m.aperiodicParams.knee); end
+            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | status=%s | mode=%s | offset %.3f | exponent %.3f%s | R² %.3f | error %.3f',app.displayTitle('specparam（原FOOOF）'),m.fitStatus,m.aperiodicParams.mode,m.aperiodicParams.offset,m.aperiodicParams.exponent,kneeText,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best'); grid(app.Controls.FooofAxes,'on');
             if ~isempty(m.peakParams), rows=cell(numel(m.peakParams),4); for k=1:numel(m.peakParams), rows{k,1}=m.peakParams(k).CF; rows{k,2}=m.peakParams(k).PW; rows{k,3}=m.peakParams(k).BW; rows{k,4}=char(m.peakParams(k).peakBand); end; app.Controls.FooofTable.Data=rows; end
             app.Controls.FooofTable.ColumnName={'CF_Hz','PW_log10','BW_Hz','peakBand'};
         end
 
         function renderBand(app)
-            cla(app.Controls.BandAxes); app.Controls.BandResultTable.Data=cell(0,1); if isempty(fieldnames(app.BandResult)) || ~isfield(app.BandResult,'table'), return; end
+            if isgraphics(app.Controls.BandPlotPanel)
+                delete(findall(app.Controls.BandPlotPanel, 'Type', 'axes'));
+            end
+            app.Controls.BandResultTable.Data=cell(0,1); if isempty(fieldnames(app.BandResult)) || ~isfield(app.BandResult,'table'), return; end
             tbl=app.BandResult.table; app.Controls.BandResultTable.Data=lfp_table_to_uitable_data(tbl); app.Controls.BandResultTable.ColumnName=tbl.Properties.VariableNames;
-            metric=string(app.Controls.BandMetric.Value); names=unique(tbl.band,'stable'); chans=unique(tbl.channelIndex,'stable'); values=NaN(numel(chans),numel(names));
-            for i=1:numel(chans), for j=1:numel(names), row=tbl.channelIndex==chans(i)&tbl.band==names(j); if any(row), values(i,j)=tbl.(metric)(find(row,1)); end, end, end
-            imagesc(app.Controls.BandAxes,values); colorbar(app.Controls.BandAxes); set(app.Controls.BandAxes,'XTick',1:numel(names),'XTickLabel',names,'YTick',1:numel(chans),'YTickLabel',chans); xlabel(app.Controls.BandAxes,'Band'); ylabel(app.Controls.BandAxes,'Channel'); title(app.Controls.BandAxes,'频段功率：'+metric); grid(app.Controls.BandAxes,'on');
-        end
-
-        function renderSummary(app)
-            cla(app.Controls.SummaryPsdAxes); if ~isempty(fieldnames(app.PsdResult)), [summaryPower, summaryLabel] = app.displayPower(app.PsdResult.psd); app.plotSpectrum(app.Controls.SummaryPsdAxes,app.PsdResult.frequencyHz,summaryPower,'-',[0.1 0.25 0.8],'PSD'); xlabel(app.Controls.SummaryPsdAxes,'Hz'); ylabel(app.Controls.SummaryPsdAxes,summaryLabel); title(app.Controls.SummaryPsdAxes,'PSD'); grid(app.Controls.SummaryPsdAxes,'on'); else, title(app.Controls.SummaryPsdAxes,'尚未计算 PSD'); end
-            cla(app.Controls.SummaryFitAxes); if ~isempty(app.ModelResult), ex=NaN(1,numel(app.ModelResult)); r2=ex; for k=1:numel(app.ModelResult), ex(k)=app.ModelResult(k).aperiodicParams.exponent; r2(k)=app.ModelResult(k).rSquared; end; yyaxis(app.Controls.SummaryFitAxes,'left'); bar(app.Controls.SummaryFitAxes,ex); ylabel(app.Controls.SummaryFitAxes,'Exponent'); yyaxis(app.Controls.SummaryFitAxes,'right'); plot(app.Controls.SummaryFitAxes,r2,'o-'); ylabel(app.Controls.SummaryFitAxes,'R²'); title(app.Controls.SummaryFitAxes,'拟合质量'); xlabel(app.Controls.SummaryFitAxes,'Channel'); grid(app.Controls.SummaryFitAxes,'on'); else, title(app.Controls.SummaryFitAxes,'尚未拟合'); end
-            cla(app.Controls.SummaryBandAxes); if ~isempty(fieldnames(app.BandResult)) && isfield(app.BandResult,'table'), tbl=app.BandResult.table; names=unique(tbl.band,'stable'); chans=unique(tbl.channelIndex,'stable'); values=NaN(numel(chans),numel(names)); for i=1:numel(chans), for j=1:numel(names), row=tbl.channelIndex==chans(i)&tbl.band==names(j); if any(row), values(i,j)=tbl.totalPower(find(row,1)); end, end, end; imagesc(app.Controls.SummaryBandAxes,values); colorbar(app.Controls.SummaryBandAxes); title(app.Controls.SummaryBandAxes,'总频段功率'); else, title(app.Controls.SummaryBandAxes,'尚未计算频段功率'); end
-            cla(app.Controls.SummaryArtifactAxes); if ~isempty(fieldnames(app.ArtifactResult)) && isfield(app.ArtifactResult,'summary') && isfield(app.ArtifactResult.summary,'channelArtifactPercentage'), bar(app.Controls.SummaryArtifactAxes,app.ArtifactResult.summary.channelArtifactPercentage); ylabel(app.Controls.SummaryArtifactAxes,'%'); xlabel(app.Controls.SummaryArtifactAxes,'Channel'); title(app.Controls.SummaryArtifactAxes,'各通道伪迹比例'); grid(app.Controls.SummaryArtifactAxes,'on'); else, title(app.Controls.SummaryArtifactAxes,'尚未检测伪迹'); end
+            metric=string(app.Controls.BandMetric.Value); names=unique(string(tbl.band),'stable'); chans=unique(tbl.channelIndex,'stable');
+            facetByBand = string(app.Controls.BandFacet.Value) == "按频段分面";
+            if facetByBand, nPlots = numel(names); else, nPlots = numel(chans); end
+            nCols = max(1, min(3, nPlots)); nRows = max(1, ceil(nPlots / nCols));
+            panelGrid = uigridlayout(app.Controls.BandPlotPanel, [nRows nCols]); panelGrid.RowHeight = repmat({'1x'},1,nRows); panelGrid.ColumnWidth = repmat({'1x'},1,nCols); panelGrid.Padding = [4 4 4 4];
+            plotAxes = gobjects(nPlots,1);
+            if nPlots == 0, return; end
+            for plotIndex = 1:nPlots
+                ax = uiaxes(panelGrid); plotAxes(plotIndex) = ax;
+                if facetByBand
+                    bandName = names(plotIndex); values = NaN(numel(chans),1);
+                    for i=1:numel(chans), row=tbl.channelIndex==chans(i) & string(tbl.band)==bandName; if any(row), values(i)=tbl.(metric)(find(row,1)); end, end
+                    channelLabels = strings(numel(chans),1); for c=1:numel(chans), channelLabels(c)=string(tbl.channelLabel(find(tbl.channelIndex==chans(c),1))); end
+                    scatter(ax, 1:numel(chans), values, 28, 'filled'); set(ax,'XTick',1:numel(chans),'XTickLabel',cellstr(channelLabels)); xlabel(ax,'Channel'); title(ax, bandName + " [" + string(tbl.lowHz(find(string(tbl.band)==bandName,1))) + "-" + string(tbl.highHz(find(string(tbl.band)==bandName,1))) + " Hz]", 'Interpreter','none');
+                else
+                    channel = chans(plotIndex); values = NaN(numel(names),1);
+                    for j=1:numel(names), row=tbl.channelIndex==channel & string(tbl.band)==names(j); if any(row), values(j)=tbl.(metric)(find(row,1)); end, end
+                    scatter(ax, 1:numel(names), values, 28, 'filled'); set(ax,'XTick',1:numel(names),'XTickLabel',cellstr(names)); xlabel(ax,'Band'); title(ax, string(tbl.channelLabel(find(tbl.channelIndex==channel,1))), 'Interpreter','none');
+                end
+                ylabel(ax, metric); grid(ax,'on');
+            end
+            app.Controls.BandAxes = plotAxes(1);
         end
 
         function [values, label] = displayPower(app, power)
@@ -954,7 +1062,10 @@ classdef LfpApp < handle
         end
 
         function defaultText = defaultFsText(~, inspection)
-            if isfinite(inspection.estimatedSamplingRateHz), defaultText = sprintf('%.10g',inspection.estimatedSamplingRateHz); elseif inspection.isSceneRay, defaultText='1000'; else, defaultText=''; end
+            % Keep the editable import default deterministic.  A measured
+            % rate from a time column is shown in the dialog note and is
+            % never silently used to overwrite the user's confirmation.
+            defaultText = '1000';
         end
 
         function values = parseIndexList(~, textValue)
@@ -1029,6 +1140,11 @@ classdef LfpApp < handle
         function merged = mergeConfig(~, base, override)
             merged=base; if ~isstruct(override), error('LFP:InvalidConfig','配置必须是 struct。'); end
             fields=fieldnames(override); for k=1:numel(fields), name=fields{k}; if isstruct(override.(name)) && isfield(base,name) && isstruct(base.(name)), merged.(name)=mergeConfig_local(base.(name),override.(name)); else, merged.(name)=override.(name); end, end
+            if isfield(merged, 'fooof') && isfield(merged.fooof, 'interpolateLineNoise')
+                legacyFields = intersect(fieldnames(merged.fooof), {'interpolateLineNoise', 'lineFrequencyHz', ...
+                    'lineInterpolationHalfWidthHz', 'lineInterpolationBufferSamples', 'lineIncludeHarmonics'});
+                if ~isempty(legacyFields), merged.fooof = rmfield(merged.fooof, legacyFields); end
+            end
         end
 
         function autoSaveResults(app, snapshot)
