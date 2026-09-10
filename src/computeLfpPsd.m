@@ -22,6 +22,9 @@ for index = 1:numel(required)
         error('LFP:InvalidPsdConfig', 'psdCfg.%s is required.', required{index});
     end
 end
+method = get_field(psdCfg, 'method', "welch");
+detrendMode = get_field(psdCfg, 'detrend', "constant");
+multitaper = get_field(psdCfg, 'multitaper', struct());
 resultData = lfp_compute_psd(cleanData, ...
     WindowSeconds=psdCfg.windowLengthSec, ...
     OverlapFraction=psdCfg.overlapFraction, ...
@@ -29,9 +32,44 @@ resultData = lfp_compute_psd(cleanData, ...
     MaxArtifactFraction=psdCfg.maxArtifactFraction, ...
     ExcludeArtifacts=psdCfg.excludeArtifacts, ...
     AggregationMethod=string(psdCfg.aggregationMethod), ...
+    Method=string(method), DetrendMode=string(detrendMode), ...
+    TimeBandwidthProduct=get_field(multitaper, 'timeBandwidthProduct', 3.5), ...
+    TaperCount=get_field(multitaper, 'taperCount', 0), ...
+    TaperWeighting=string(get_field(multitaper, 'weighting', "equal")), ...
     FrequencyRangeHz=psdCfg.frequencyRange);
 psdResult = resultData.spectrum;
 % Expose the updated history so a GUI/script can persist the complete audit
 % trail without needing to use the legacy DATA-returning entry point.
 psdResult.processingHistory = resultData.processingHistory;
+tfCfg = get_field(psdCfg, 'timeFrequency', struct());
+if isstruct(tfCfg) && get_field(tfCfg, 'enabled', false)
+    tfMethod = string(method);
+    if get_field(tfCfg, 'reusePsdParameters', true)
+        tfWindow = psdCfg.windowLengthSec;
+        tfStep = psdCfg.windowLengthSec * (1 - psdCfg.overlapFraction);
+        tfNfft = psdCfg.nfft;
+        tfRange = psdCfg.frequencyRange;
+        tfNW = get_field(multitaper, 'timeBandwidthProduct', 3.5);
+        tfK = get_field(multitaper, 'taperCount', 0);
+    else
+        tfWindow = get_field(tfCfg, 'windowLengthSec', 1);
+        tfStep = get_field(tfCfg, 'stepSeconds', 0.25);
+        tfNfft = get_field(tfCfg, 'nfft', 0);
+        tfRange = get_field(tfCfg, 'frequencyRange', psdCfg.frequencyRange);
+        tfMt = get_field(tfCfg, 'multitaper', struct());
+        tfNW = get_field(tfMt, 'timeBandwidthProduct', get_field(multitaper, 'timeBandwidthProduct', 3.5));
+        tfK = get_field(tfMt, 'taperCount', get_field(multitaper, 'taperCount', 0));
+    end
+    tfData = lfp_compute_time_frequency(cleanData, ...
+        WindowSeconds=tfWindow, StepSeconds=tfStep, Nfft=tfNfft, ...
+        FrequencyRangeHz=tfRange, MaxArtifactFraction=get_field(tfCfg, 'maxArtifactFraction', psdCfg.maxArtifactFraction), ...
+        ExcludeArtifacts=psdCfg.excludeArtifacts, Method=tfMethod, ...
+        TimeBandwidthProduct=tfNW, TaperCount=tfK, ...
+        PowerScale=string(get_field(tfCfg, 'powerScale', "linear")));
+    psdResult.timeFrequency = tfData.timeFrequency;
+end
+end
+
+function value = get_field(s, name, defaultValue)
+if isstruct(s) && isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
 end

@@ -1,5 +1,5 @@
 function data = lfp_compute_psd(data, options)
-%LFP_COMPUTE_PSD Compute a one-sided Welch PSD using base MATLAB operations.
+%LFP_COMPUTE_PSD Compute a one-sided Welch or DPSS multitaper PSD.
 %   DATA = LFP_COMPUTE_PSD(DATA) stores a spectrum in DATA.spectrum. The
 %   input signal is not filtered and line-frequency peaks are retained.
 %   Windows with too many artifact or non-finite samples are excluded.
@@ -14,10 +14,28 @@ arguments
     options.ExcludeArtifacts (1,1) logical = true
     options.AggregationMethod (1,1) string {mustBeMember(options.AggregationMethod, ["mean" "median"])} = "mean"
     options.Taper (1,1) string {mustBeMember(options.Taper, "hann")} = "hann"
+    options.Method (1,1) string {mustBeMember(options.Method, ["welch" "multitaper"])} = "welch"
+    options.DetrendMode (1,1) string {mustBeMember(options.DetrendMode, ["" "none" "constant" "linear"])} = ""
+    options.TimeBandwidthProduct (1,1) double {mustBeFinite, mustBeGreaterThan(options.TimeBandwidthProduct, 0.5)} = 3.5
+    options.TaperCount (1,1) double {mustBeInteger, mustBeNonnegative} = 0
+    options.TaperWeighting (1,1) string {mustBeMember(options.TaperWeighting, "equal")} = "equal"
     options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 40]
 end
 
 validate_data(data);
+if options.Method == "multitaper"
+    data = lfp_compute_multitaper_psd(data, ...
+        WindowSeconds=options.WindowSeconds, ...
+        OverlapFraction=options.OverlapFraction, Nfft=options.Nfft, ...
+        MaxArtifactFraction=options.MaxArtifactFraction, ...
+        ExcludeArtifacts=options.ExcludeArtifacts, ...
+        AggregationMethod=options.AggregationMethod, ...
+        DetrendMode=resolve_detrend_mode(options.DetrendMode, options.DetrendConstant), ...
+        TimeBandwidthProduct=options.TimeBandwidthProduct, ...
+        TaperCount=options.TaperCount, TaperWeighting=options.TaperWeighting, ...
+        FrequencyRangeHz=options.FrequencyRangeHz);
+    return;
+end
 signal = double(data.signal);
 [nSamples, nChannels] = size(signal);
 fs = double(data.fs);
@@ -130,6 +148,7 @@ spectrum.parameters = struct('windowSeconds', options.WindowSeconds, ...
     'nfft', nfft, 'maxArtifactFraction', options.MaxArtifactFraction, ...
     'detrendConstant', options.DetrendConstant, 'excludeArtifacts', options.ExcludeArtifacts, ...
     'aggregationMethod', options.AggregationMethod, 'taper', options.Taper, ...
+    'method', "welch", 'detrend', resolve_detrend_mode(options.DetrendMode, options.DetrendConstant), ...
     'frequencyRangeHz', options.FrequencyRangeHz);
 data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
@@ -170,6 +189,14 @@ elseif nnz(finite) == 1
 else
     index = (1:numel(values))';
     values(~finite) = interp1(index(finite), values(finite), index(~finite), 'linear', 'extrap');
+end
+end
+
+function value = resolve_detrend_mode(mode, detrendConstant)
+if strlength(mode) == 0
+    if detrendConstant, value = "constant"; else, value = "none"; end
+else
+    value = mode;
 end
 end
 
