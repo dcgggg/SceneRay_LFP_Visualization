@@ -24,7 +24,7 @@ verifySize(testCase, out.spectralParameters.aperiodicPsd, size(psd));
 verifyEqual(testCase, out.processingHistory(end).operation, "fixed_spectral_parameterization");
 end
 
-function testLineNoiseInterpolationIsUsedButOriginalRetained(testCase)
+function testLegacyFittingCopyIsIgnored(testCase)
 ensure_src_on_path(testCase);
 frequencyHz = (1:100)';
 psd = 100 ./ frequencyHz;
@@ -34,7 +34,7 @@ spectrum = lfp_interpolate_line_noise(spectrum);
 data = base_data(spectrum);
 out = lfp_fit_spectral_parameters(data, FitRangeHz=[3 90]);
 verifyEqual(testCase, out.spectralParameters.originalPsd(40), 1000);
-verifyLessThan(testCase, out.spectralParameters.fittingPsd(40), 10);
+verifyEqual(testCase, out.spectralParameters.fittingPsd(40), 1000);
 end
 
 function data = base_data(spectrum)
