@@ -8,7 +8,16 @@ classdef LfpApp < handle
     properties
         Figure
         Config
+        UiStyle = struct('labelFontSize', 11, 'buttonHeight', 30, ...
+            'panelPadding', [8 8 8 8], 'defaultControlWidth', 180)
         Data = struct()
+        Datasets = struct('id', {}, 'fileName', {}, 'filePath', {}, ...
+            'time', {}, 'signal', {}, 'fs', {}, 'channelLabels', {}, ...
+            'units', {}, 'metadata', {}, 'analysisResults', {}, 'status', {})
+        CurrentDatasetIndex = 0
+        AppState = struct('selectedDatasets', [], 'selectedChannels', [], ...
+            'selectedAnalysis', "current", 'currentResults', struct(), ...
+            'plotSettings', struct())
         CleanData = struct()
         AnalysisData = struct()
         ArtifactResult = struct()
@@ -55,9 +64,18 @@ classdef LfpApp < handle
 
         function onImport(app, ~, ~)
             if app.IsRunning, return; end
-            [file, folder] = uigetfile({'*.csv', 'CSV 文件 (*.csv)'}, '选择 LFP CSV 文件');
+            [file, folder] = uigetfile({'*.csv', 'CSV 文件 (*.csv)'}, '选择一个或多个 LFP CSV 文件', 'MultiSelect', 'on');
             if isequal(file, 0), return; end
-            app.openImportDialog(string(fullfile(folder, file)));
+            if iscell(file)
+                files = strings(numel(file), 1);
+                for k = 1:numel(file), files(k) = string(fullfile(folder, file{k})); end
+            else
+                files = string(fullfile(folder, file));
+            end
+            for k = 1:numel(files)
+                if ~isfile(files(k)), continue; end
+                app.openImportDialog(files(k));
+            end
         end
 
         function onLoadConfig(app, ~, ~)
@@ -134,14 +152,13 @@ classdef LfpApp < handle
 
         function onRun(app, ~, ~)
             if app.IsRunning, return; end
-            if isempty(fieldnames(app.Data))
-                app.showWarning("尚未导入数据", "请先选择并确认一个 CSV 文件。");
+            datasetIndices = app.selectedDatasetIndices();
+            if isempty(datasetIndices)
+                app.showWarning("尚未导入数据", "请先导入并选择至少一个 CSV 文件。");
                 return;
             end
             try
                 cfg = app.readConfigFromUi();
-                snapshot = app.makeRunSnapshot(cfg);
-                app.validateRun(snapshot);
             catch exception
                 app.showError("运行参数有误", exception);
                 return;
@@ -152,121 +169,20 @@ classdef LfpApp < handle
             app.setControlsEnabled(false);
             cleanup = onCleanup(@() app.finishRun()); %#ok<NASGU>
             try
-                app.setProgress(0.05, "准备数据");
-                selectedData = app.selectChannels(app.Data, snapshot.channels);
-                fullArtifact = app.emptyArtifact(selectedData);
-                fullClean = selectedData;
-                fullClean.cleanedSignal = selectedData.signal;
-
-                needPsd = snapshot.modules.psd || snapshot.modules.fooof || snapshot.modules.band;
-                needModel = snapshot.modules.fooof || snapshot.modules.band;
-                needArtifact = snapshot.modules.artifact || ...
-                    (needPsd && snapshot.cfg.psd.excludeArtifacts && ~app.Cache.artifactValid);
-
-                if needArtifact
-                    app.setProgress(0.15, "检测伪迹");
-                    [fullClean, fullArtifact] = detectAndHandleArtifacts(selectedData, snapshot.cfg.artifact);
-                    fullArtifact.channelIndices = snapshot.channels;
+                total = numel(datasetIndices);
+                for datasetOrder = 1:total
                     app.checkCancellation();
-                elseif app.Cache.artifactValid && app.compatibleArtifact(app.ArtifactResult, selectedData)
-                    fullArtifact = app.ArtifactResult;
-                    fullArtifact.channelIndices = snapshot.channels;
-                    fullClean.artifacts = fullArtifact;
-                    fullClean.cleanedSignal = selectedData.signal;
-                    fullClean.cleanedSignal(fullArtifact.channelMask) = NaN;
+                    app.activateDataset(datasetIndices(datasetOrder), false);
+                    snapshot = app.makeRunSnapshot(cfg);
+                    app.validateRun(snapshot);
+                    app.setProgress((datasetOrder - 1) / total, sprintf('准备数据 %d/%d', datasetOrder, total));
+                    app.runCurrentDataset(snapshot, datasetOrder, total);
+                    if app.CancelRequested, break; end
                 end
-                if ~isfield(fullArtifact, 'channelIndices')
-                    fullArtifact.channelIndices = snapshot.channels;
+                if ~app.CancelRequested
+                    app.setProgress(1, sprintf('已完成 %d 个数据集', total));
+                    app.logMessage("所选数据集已分别完成分析；未进行跨数据集合并。", "info");
                 end
-
-                analysisIndex = app.timeIndexForRange(selectedData, snapshot.analysisRange);
-                analysisData = app.sliceData(selectedData, analysisIndex);
-                analysisArtifact = app.sliceArtifact(fullArtifact, analysisIndex, selectedData.fs);
-                analysisClean = app.sliceData(fullClean, analysisIndex);
-                analysisClean.artifacts = analysisArtifact;
-                analysisClean.cleanedSignal = analysisData.signal;
-                analysisClean.cleanedSignal(analysisArtifact.channelMask) = NaN;
-
-                beforePsd = struct();
-                psd = struct();
-                model = struct([]);
-                band = struct();
-                if needPsd
-                    app.setProgress(0.35, "计算 PSD");
-                    psdCfgBefore = snapshot.cfg.psd;
-                    if isfield(psdCfgBefore, 'timeFrequency'), psdCfgBefore.timeFrequency.enabled = false; end
-                    if snapshot.modules.artifact || needArtifact
-                        emptyForBefore = app.emptyArtifact(analysisData);
-                        beforePsd = computeLfpPsd(analysisData, emptyForBefore, psdCfgBefore);
-                    else
-                        beforePsd = computeLfpPsd(analysisData, app.emptyArtifact(analysisData), psdCfgBefore);
-                    end
-                    app.checkCancellation();
-                    psd = computeLfpPsd(analysisClean, analysisArtifact, snapshot.cfg.psd);
-                end
-                if needModel
-                    app.setProgress(0.58, "拟合周期/非周期谱");
-                    model = parameterizePowerSpectrum(psd.frequencyHz, psd.psd, snapshot.cfg.fooof);
-                    model = app.addModelContext(model, analysisData);
-                    app.checkCancellation();
-                end
-                if snapshot.modules.band
-                    app.setProgress(0.74, "计算频段功率");
-                    band = computeBandPower(psd, model, snapshot.cfg.bands);
-                    app.checkCancellation();
-                end
-
-                analysisData.artifacts = analysisArtifact;
-                analysisData.cleanedSignal = analysisClean.cleanedSignal;
-                if needPsd, analysisData.spectrum = psd; end
-                if needModel
-                    analysisData.spectralParameters = struct( ...
-                        'aperiodicPsd', app.collectModelField(model, 'aperiodicFit'), ...
-                        'periodicPowerAboveAperiodic', app.collectModelField(model, 'periodicFit'));
-                end
-                if snapshot.modules.band, analysisData.bandPower = band; end
-                analysisData.metadata.analysisRangeSeconds = snapshot.analysisRange;
-                analysisData.metadata.selectedChannels = snapshot.channels;
-                analysisData.metadata.runSnapshot = snapshot;
-                if ~needPsd
-                    analysisData.processingHistory = analysisClean.processingHistory;
-                elseif isfield(psd, 'processingHistory')
-                    analysisData.processingHistory = psd.processingHistory;
-                end
-                if needModel
-                    analysisData.processingHistory(end + 1) = struct('operation', "spectral_parameterization", ...
-                        'parameters', snapshot.cfg.fooof, 'notes', "Native specparam periodic and aperiodic model fitted in GUI run.");
-                end
-                if snapshot.modules.band
-                    analysisData.processingHistory(end + 1) = struct('operation', "band_power", ...
-                        'parameters', snapshot.cfg.bands, 'notes', "Band powers computed from the GUI run PSD/model snapshot.");
-                end
-
-                if app.CancelRequested
-                    app.logMessage("用户请求取消；本次临时结果未替换上一份成功结果。", "warning");
-                    return;
-                end
-                app.Config = snapshot.cfg;
-                app.CleanData = fullClean;
-                app.ArtifactResult = fullArtifact;
-                app.AnalysisData = analysisData;
-                app.BeforePsd = beforePsd;
-                app.PsdResult = psd;
-                app.ModelResult = model;
-                app.BandResult = band;
-                app.LastRunSnapshot = snapshot;
-                app.LastRunError = "";
-                app.Cache = struct('artifactValid', ~isempty(fieldnames(fullArtifact)), ...
-                    'psdValid', ~isempty(fieldnames(psd)), ...
-                    'modelValid', ~isempty(model), 'bandValid', ~isempty(fieldnames(band)), ...
-                    'plotValid', true);
-                app.setProgress(0.88, "更新图形");
-                app.renderAll();
-                if snapshot.autoSave
-                    app.autoSaveResults(snapshot);
-                end
-                app.setProgress(1, "运行完成");
-                app.logMessage("本次运行完成。结果使用当前参数快照。", "info");
             catch exception
                 if strcmp(exception.identifier, 'LFP:UserCancelled')
                     app.LastRunError = "";
@@ -304,6 +220,7 @@ classdef LfpApp < handle
         function onChannelChanged(app, ~, ~)
             if app.IsRunning || isempty(fieldnames(app.Data)), return; end
             try
+                app.AppState.selectedChannels = app.selectedChannels();
                 app.renderRaw();
                 app.setStatus("已更新通道显示；分析结果仍使用上一次运行快照。", "info");
             catch exception
@@ -347,52 +264,422 @@ classdef LfpApp < handle
             app.Controls.BandTable.Data = raw;
             app.invalidateStage('band', '已删除频段，需重新计算频段功率。');
         end
+
+        function onDatasetTableEdit(app, ~, ~)
+            if app.IsRunning, return; end
+            indices = app.selectedDatasetIndices();
+            if isempty(indices) && ~isempty(app.Datasets)
+                raw = app.Controls.DatasetTable.Data;
+                if ~isempty(raw), raw(:,1) = {false}; app.Controls.DatasetTable.Data = raw; end
+                app.setStatus('请至少选择一个数据集。', 'warning');
+                return;
+            end
+            app.AppState.selectedDatasets = indices;
+            if ~isempty(indices)
+                app.activateDataset(indices(1));
+                app.setStatus(sprintf('已选择 %d 个数据集；当前显示第一个数据集。', numel(indices)), 'info');
+            end
+        end
+
+        function onDatasetDropDownChanged(app, source, ~)
+            if app.IsRunning, return; end
+            index = find(string(source.Items) == string(source.Value), 1);
+            if isempty(index) && isnumeric(source.Value), index = round(source.Value); end
+            if isempty(index) || index < 1 || index > numel(app.Datasets), return; end
+            if isfield(app.Controls, 'DatasetTable') && index >= 1 && index <= numel(app.Datasets)
+                raw = app.Controls.DatasetTable.Data;
+                raw(:,1) = {false}; raw{index,1} = true;
+                app.Controls.DatasetTable.Data = raw;
+            end
+            app.activateDataset(index);
+            app.renderAll();
+        end
+
+        function onResultChannelChanged(app, source, ~)
+            if app.IsRunning, return; end
+            label = string(source.Value);
+            labels = string(app.Data.channelLabels(:));
+            if any(labels == label)
+                app.Controls.ChannelList.Value = cellstr(label);
+                app.AppState.selectedChannels = find(labels == label, 1);
+            end
+            app.renderAll();
+        end
+
+        function selectAllDatasets(app, ~, ~)
+            if app.IsRunning || isempty(app.Datasets), return; end
+            raw = app.Controls.DatasetTable.Data; raw(:,1) = {true}; app.Controls.DatasetTable.Data = raw;
+            app.AppState.selectedDatasets = 1:numel(app.Datasets);
+            app.setStatus('已全选数据集。', 'info');
+        end
+
+        function clearDatasetSelection(app, ~, ~)
+            if app.IsRunning, return; end
+            raw = app.Controls.DatasetTable.Data;
+            if ~isempty(raw), raw(:,1) = {false}; app.Controls.DatasetTable.Data = raw; end
+            app.AppState.selectedDatasets = [];
+            app.setStatus('已清除数据集选择。', 'warning');
+        end
+
+        function deleteSelectedDatasets(app, ~, ~)
+            if app.IsRunning, return; end
+            indices = app.selectedDatasetIndices();
+            if isempty(indices), app.showWarning('没有选择', '请先勾选需要删除的数据集。'); return; end
+            if isgraphics(app.Figure) && strcmp(app.Figure.Visible, 'on')
+                choice = uiconfirm(app.Figure, sprintf('确认从当前会话删除 %d 个数据集？原始 CSV 文件不会被删除。', numel(indices)), ...
+                    '删除数据集', 'Options', {'删除', '取消'}, 'DefaultOption', 2, 'CancelOption', 2);
+                if ~strcmp(choice, '删除'), return; end
+            end
+            app.Datasets(indices) = [];
+            if isempty(app.Datasets)
+                app.CurrentDatasetIndex = 0; app.Data = struct(); app.resetCurrentResults();
+            else
+                app.CurrentDatasetIndex = min(max(1, app.CurrentDatasetIndex), numel(app.Datasets));
+                app.activateDataset(app.CurrentDatasetIndex);
+            end
+            app.refreshDatasetTable(); app.setStatus('已删除选中的会话数据集；CSV 文件未被删除。', 'info');
+        end
+
+        function showSelectedDatasetInfo(app, ~, ~)
+            indices = app.selectedDatasetIndices();
+            if isempty(indices), app.showWarning('没有选择', '请先选择数据集。'); return; end
+            lines = strings(numel(indices), 1);
+            for k = 1:numel(indices)
+                d = app.Datasets(indices(k));
+                lines(k) = sprintf('%s | %d 通道 | %.6g Hz | %s', char(d.fileName), size(d.signal,2), d.fs, char(d.status));
+            end
+            if isgraphics(app.Figure) && strcmp(app.Figure.Visible, 'on')
+                uialert(app.Figure, strjoin(lines, newline), '数据集信息', 'Icon', 'info');
+            else
+                app.logMessage(strjoin(lines, ' ; '), 'info');
+            end
+        end
+
+        function onSaveView(app, kind, ~)
+            if app.IsRunning, return; end
+            kind = string(kind);
+            [file, folder, filterIndex] = uiputfile({'*.png','PNG 图片'; '*.svg','SVG 矢量图'; '*.fig','MATLAB FIG 文件'}, ...
+                '保存当前图形', char(kind + ".png"));
+            if isequal(file,0), return; end
+            switch kind
+                case "raw", ax = app.Controls.RawAxes;
+                case "psd", ax = app.Controls.PsdAxes;
+                case "timeFrequency", ax = app.Controls.PsdTimeFrequencyAxes;
+                case "specparam", ax = app.Controls.FooofAxes;
+                case "band", ax = app.Controls.BandAxes;
+                otherwise, error('LFP:UnknownPlot', '未知绘图视图：%s', kind);
+            end
+            target = fullfile(folder, file); fig = ancestor(ax, 'figure');
+            try
+                if filterIndex == 3 || endsWith(lower(string(file)), '.fig')
+                    savefig(fig, target);
+                else
+                    exportgraphics(ax, target, 'Resolution', app.Config.plot.exportResolution, 'ContentType', ternary_local(filterIndex == 2, 'vector', 'image'));
+                end
+                app.logMessage("图形已保存：" + string(target), "info");
+            catch exception
+                app.showError("图形保存失败", exception);
+            end
+        end
+
+        function onSaveViewData(app, kind, ~)
+            if app.IsRunning, return; end
+            [file, folder] = uiputfile('*.mat', '保存当前视图数据', char(string(kind) + "_view.mat"));
+            if isequal(file,0), return; end
+            payload = struct('dataset', app.currentDatasetName(), 'channel', string(app.Data.channelLabels(:)), ...
+                'analysisParameters', get_field_local(app.LastRunSnapshot, 'cfg', app.Config), ...
+                'savedAt', string(datestr(now, 31)), 'kind', string(kind));
+            switch string(kind)
+                case "raw", payload.time = app.Data.time; payload.signal = app.Data.signal;
+                case "psd", payload.beforePsd = app.BeforePsd; payload.psd = app.PsdResult;
+                case "timeFrequency", payload.timeFrequency = get_field_local(app.PsdResult, 'timeFrequency', struct());
+                case "specparam", payload.modelResult = app.ModelResult;
+                case "band", payload.bandResult = app.BandResult;
+            end
+            target = fullfile(folder, file); save(target, 'payload', '-v7'); app.logMessage("视图数据已保存：" + string(target), "info");
+        end
+    end
+
+    methods (Access=public)
+        function setData(app, data)
+            %SETDATA Public programmatic import hook for tests and scripts.
+            % GUI file selection still routes through the configured importer.
+            if ~isfield(data.metadata, 'sourceFilePath'), data.metadata.sourceFilePath = ""; end
+            if ~isfield(data.metadata, 'displayName')
+                data.metadata.displayName = string(get_field_local(data.metadata, 'sourceFileName', "dataset"));
+            end
+            app.addDataset(data);
+        end
     end
 
     methods (Access=private)
+        function addDataset(app, data)
+            if ~isfield(data, 'signal') || ~isnumeric(data.signal) || isempty(data.signal)
+                error('LFP:InvalidData', '数据集必须包含非空 numeric signal。');
+            end
+            if ~isfield(data, 'time') || numel(data.time) ~= size(data.signal, 1)
+                data.time = (0:size(data.signal,1)-1)' / double(data.fs);
+            end
+            if ~isfield(data, 'channelLabels') || numel(data.channelLabels) ~= size(data.signal,2)
+                data.channelLabels = "channel_" + string((1:size(data.signal,2))');
+            end
+            if ~isfield(data, 'metadata') || ~isstruct(data.metadata), data.metadata = struct(); end
+            if ~isfield(data.metadata, 'sourceFileName'), data.metadata.sourceFileName = "dataset_" + string(numel(app.Datasets)+1); end
+            if ~isfield(data.metadata, 'sourceFilePath'), data.metadata.sourceFilePath = ""; end
+            if ~isfield(data.metadata, 'displayName'), data.metadata.displayName = string(data.metadata.sourceFileName); end
+            if ~isfield(data, 'units'), data.units = "unknown"; end
+            datasetId = "dataset_" + string(numel(app.Datasets) + 1);
+            entry = struct('id', datasetId, 'fileName', string(data.metadata.sourceFileName), ...
+                'filePath', string(data.metadata.sourceFilePath), 'time', double(data.time(:)), ...
+                'signal', double(data.signal), 'fs', double(data.fs), ...
+                'channelLabels', string(data.channelLabels(:)), 'units', string(data.units), ...
+                'metadata', data.metadata, 'analysisResults', struct(), 'status', "已导入");
+            app.Datasets(end + 1) = entry;
+            newIndex = numel(app.Datasets);
+            app.CurrentDatasetIndex = 0;
+            app.activateDataset(newIndex, false);
+            app.AppState.selectedDatasets = newIndex;
+            app.refreshDatasetTable();
+            app.invalidateAll("已导入数据集，请运行所选分析。");
+            app.logMessage("已加入数据集 " + entry.fileName + "（" + string(size(entry.signal,2)) + " 通道）", "info");
+        end
+
+        function resetCurrentResults(app)
+            app.CleanData = struct(); app.AnalysisData = struct(); app.ArtifactResult = struct();
+            app.BeforePsd = struct(); app.PsdResult = struct(); app.ModelResult = struct([]); app.BandResult = struct();
+            app.LastRunSnapshot = struct(); app.LastRunError = "";
+            app.Cache = struct('artifactValid', false, 'psdValid', false, 'modelValid', false, 'bandValid', false, 'plotValid', false);
+            app.AppState.currentResults = struct();
+        end
+
+        function saveCurrentDataset(app)
+            index = app.CurrentDatasetIndex;
+            if index < 1 || index > numel(app.Datasets), return; end
+            if isempty(fieldnames(app.Data)), return; end
+            app.Datasets(index).time = double(app.Data.time(:));
+            app.Datasets(index).signal = double(app.Data.signal);
+            app.Datasets(index).fs = double(app.Data.fs);
+            app.Datasets(index).channelLabels = string(app.Data.channelLabels(:));
+            app.Datasets(index).units = string(app.Data.units);
+            app.Datasets(index).metadata = app.Data.metadata;
+            app.Datasets(index).analysisResults = struct('cleanData', app.CleanData, ...
+                'artifactResult', app.ArtifactResult, 'beforePsd', app.BeforePsd, ...
+                'psdResult', app.PsdResult, 'modelResult', app.ModelResult, ...
+                'bandResult', app.BandResult, 'analysisData', app.AnalysisData, ...
+                'snapshot', app.LastRunSnapshot, 'cache', app.Cache);
+            if ~isempty(fieldnames(app.AnalysisData)), app.Datasets(index).status = "已完成"; else, app.Datasets(index).status = "已导入"; end
+        end
+
+        function activateDataset(app, index, redraw)
+            if nargin < 3, redraw = true; end
+            if isempty(app.Datasets)
+                app.AppState.selectedDatasets = [];
+                return;
+            end
+            app.saveCurrentDataset();
+            index = max(1, min(numel(app.Datasets), round(index)));
+            app.CurrentDatasetIndex = index;
+            entry = app.Datasets(index);
+            app.Data = struct('signal', entry.signal, 'fs', entry.fs, 'time', entry.time, ...
+                'channelLabels', entry.channelLabels, 'channelNames', entry.channelLabels, ...
+                'channelCount', size(entry.signal,2), 'units', entry.units, 'metadata', entry.metadata, ...
+                'processingHistory', get_field_local(entry.metadata, 'processingHistory', struct()));
+            if isempty(fieldnames(app.Data.processingHistory))
+                app.Data.processingHistory = struct('operation', "import", 'parameters', get_field_local(entry.metadata, 'importSettings', struct()), 'notes', "Dataset activated in GUI.");
+            end
+            results = entry.analysisResults;
+            if isfield(results, 'analysisData') && ~isempty(fieldnames(results.analysisData))
+                app.CleanData = results.cleanData; app.ArtifactResult = results.artifactResult;
+                app.BeforePsd = results.beforePsd; app.PsdResult = results.psdResult;
+                app.ModelResult = results.modelResult; app.BandResult = results.bandResult;
+                app.AnalysisData = results.analysisData; app.LastRunSnapshot = results.snapshot;
+                if isfield(results, 'cache'), app.Cache = results.cache; end
+            else
+                app.resetCurrentResults();
+            end
+            labels = string(entry.channelLabels(:));
+            if isfield(app.Controls, 'ChannelList') && isgraphics(app.Controls.ChannelList)
+                app.Controls.ChannelList.Items = cellstr(labels);
+                app.Controls.ChannelList.Value = cellstr(labels);
+            end
+            [timeStart, timeEnd] = app.timeBounds(app.Data);
+            if isfield(app.Controls, 'AnalysisStart')
+                app.Controls.AnalysisStart.Value = timeStart; app.Controls.AnalysisEnd.Value = timeEnd;
+                app.Controls.DisplayStart.Value = timeStart; app.Controls.DisplayEnd.Value = timeEnd;
+            end
+            app.AppState.selectedDatasets = app.selectedDatasetIndices();
+            app.AppState.selectedChannels = 1:size(entry.signal,2);
+            app.updateDataInfo(); app.updateDatasetSelectors();
+            if redraw && isgraphics(app.Figure), app.renderAll(); end
+        end
+
+        function indices = selectedDatasetIndices(app)
+            if isempty(app.Datasets)
+                if isempty(fieldnames(app.Data)), indices = []; else, indices = 1; end
+                return;
+            end
+            raw = app.Controls.DatasetTable.Data;
+            if isempty(raw), indices = app.CurrentDatasetIndex; return; end
+            flags = false(size(raw,1),1);
+            for k = 1:size(raw,1), flags(k) = islogical(raw{k,1}) && raw{k,1}; end
+            indices = find(flags)';
+            if isempty(indices) && app.CurrentDatasetIndex >= 1, indices = app.CurrentDatasetIndex; end
+        end
+
+        function refreshDatasetTable(app)
+            if ~isfield(app.Controls, 'DatasetTable') || ~isgraphics(app.Controls.DatasetTable), return; end
+            n = numel(app.Datasets); rows = cell(n, 5); selected = app.AppState.selectedDatasets;
+            if isempty(selected) && app.CurrentDatasetIndex > 0, selected = app.CurrentDatasetIndex; end
+            for k = 1:n
+                rows{k,1} = any(selected == k); rows{k,2} = char(app.Datasets(k).fileName);
+                rows{k,3} = size(app.Datasets(k).signal, 2); rows{k,4} = app.Datasets(k).fs;
+                rows{k,5} = char(app.Datasets(k).status);
+            end
+            app.Controls.DatasetTable.Data = rows;
+            app.AppState.selectedDatasets = find(cell2mat(rows(:,1)))';
+        end
+
+        function updateDatasetSelectors(app)
+            if isempty(app.Datasets), return; end
+            names = strings(numel(app.Datasets),1);
+            for k=1:numel(app.Datasets), names(k) = app.Datasets(k).fileName; end
+            names = string(matlab.lang.makeUniqueStrings(cellstr(names)));
+            controls = {'RawDatasetDropDown','PsdDatasetDropDown','TfDatasetDropDown','FooofDatasetDropDown'};
+            for k=1:numel(controls)
+                name = controls{k};
+                if isfield(app.Controls, name) && isgraphics(app.Controls.(name))
+                    app.Controls.(name).Items = cellstr(names);
+                    app.Controls.(name).Value = char(names(app.CurrentDatasetIndex));
+                end
+            end
+            labels = string(app.Data.channelLabels(:));
+            channelControls = {'RawChannelDropDown','PsdChannelDropDown','TfChannelDropDown','FooofChannelDropDown'};
+            for k=1:numel(channelControls)
+                name=channelControls{k};
+                if isfield(app.Controls,name) && isgraphics(app.Controls.(name))
+                    app.Controls.(name).Items=cellstr(labels); app.Controls.(name).Value=char(labels(1));
+                end
+            end
+        end
+
+        function index = channelIndexFromControl(~, control, labels)
+            index = find(labels == string(control.Value), 1);
+            if isempty(index), index = 1; end
+        end
+
+        function name = currentDatasetName(app)
+            if app.CurrentDatasetIndex >= 1 && app.CurrentDatasetIndex <= numel(app.Datasets)
+                name = string(app.Datasets(app.CurrentDatasetIndex).fileName);
+            elseif ~isempty(fieldnames(app.Data)) && isfield(app.Data, 'metadata')
+                name = string(get_field_local(app.Data.metadata, 'displayName', 'current dataset'));
+            else
+                name = "current dataset";
+            end
+        end
+
+        function runCurrentDataset(app, snapshot, datasetOrder, totalDatasets)
+            selectedData = app.selectChannels(app.Data, snapshot.channels);
+            fullArtifact = app.emptyArtifact(selectedData); fullClean = selectedData; fullClean.cleanedSignal = selectedData.signal;
+            needPsd = snapshot.modules.psd || snapshot.modules.fooof || snapshot.modules.band;
+            needModel = snapshot.modules.fooof || snapshot.modules.band;
+            needArtifact = snapshot.modules.artifact || (needPsd && snapshot.cfg.psd.excludeArtifacts && ~app.Cache.artifactValid);
+            if needArtifact
+                app.setProgress((datasetOrder - 0.85) / totalDatasets, sprintf('检测伪迹 %d/%d', datasetOrder, totalDatasets));
+                [fullClean, fullArtifact] = detectAndHandleArtifacts(selectedData, snapshot.cfg.artifact);
+                fullArtifact.channelIndices = snapshot.channels; app.checkCancellation();
+            elseif app.Cache.artifactValid && app.compatibleArtifact(app.ArtifactResult, selectedData)
+                fullArtifact = app.ArtifactResult; fullArtifact.channelIndices = snapshot.channels;
+                fullClean.artifacts = fullArtifact; fullClean.cleanedSignal = selectedData.signal; fullClean.cleanedSignal(fullArtifact.channelMask) = NaN;
+            end
+            if ~isfield(fullArtifact, 'channelIndices'), fullArtifact.channelIndices = snapshot.channels; end
+            analysisIndex = app.timeIndexForRange(selectedData, snapshot.analysisRange);
+            analysisData = app.sliceData(selectedData, analysisIndex);
+            analysisArtifact = app.sliceArtifact(fullArtifact, analysisIndex, selectedData.fs);
+            analysisClean = app.sliceData(fullClean, analysisIndex); analysisClean.artifacts = analysisArtifact;
+            analysisClean.cleanedSignal = analysisData.signal; analysisClean.cleanedSignal(analysisArtifact.channelMask) = NaN;
+            beforePsd = struct(); psd = struct(); model = struct([]); band = struct();
+            if needPsd
+                app.setProgress((datasetOrder - 0.70) / totalDatasets, sprintf('计算 PSD %d/%d', datasetOrder, totalDatasets));
+                psdCfgBefore = snapshot.cfg.psd; if isfield(psdCfgBefore, 'timeFrequency'), psdCfgBefore.timeFrequency.enabled = false; end
+                beforePsd = computeLfpPsd(analysisData, app.emptyArtifact(analysisData), psdCfgBefore); app.checkCancellation();
+                psd = computeLfpPsd(analysisClean, analysisArtifact, snapshot.cfg.psd);
+            end
+            if needModel
+                app.setProgress((datasetOrder - 0.45) / totalDatasets, sprintf('拟合 specparam %d/%d', datasetOrder, totalDatasets));
+                model = parameterizePowerSpectrum(psd.frequencyHz, psd.psd, snapshot.cfg.fooof); model = app.addModelContext(model, analysisData); app.checkCancellation();
+            end
+            if snapshot.modules.band
+                app.setProgress((datasetOrder - 0.20) / totalDatasets, sprintf('计算频段功率 %d/%d', datasetOrder, totalDatasets));
+                band = computeBandPower(psd, model, snapshot.cfg.bands); app.checkCancellation();
+            end
+            analysisData.artifacts = analysisArtifact; analysisData.cleanedSignal = analysisClean.cleanedSignal;
+            if needPsd, analysisData.spectrum = psd; end
+            if needModel, analysisData.spectralParameters = struct('aperiodicPsd', app.collectModelField(model, 'aperiodicFit'), 'periodicPowerAboveAperiodic', app.collectModelField(model, 'periodicFit')); end
+            if snapshot.modules.band, analysisData.bandPower = band; end
+            analysisData.metadata.analysisRangeSeconds = snapshot.analysisRange; analysisData.metadata.selectedChannels = snapshot.channels; analysisData.metadata.runSnapshot = snapshot;
+            if ~needPsd, analysisData.processingHistory = analysisClean.processingHistory; elseif isfield(psd, 'processingHistory'), analysisData.processingHistory = psd.processingHistory; end
+            if needModel, analysisData.processingHistory(end+1) = struct('operation', "spectral_parameterization", 'parameters', snapshot.cfg.fooof, 'notes', "Native specparam periodic and aperiodic model fitted in GUI run."); end
+            if snapshot.modules.band, analysisData.processingHistory(end+1) = struct('operation', "band_power", 'parameters', snapshot.cfg.bands, 'notes', "Band powers computed from the GUI run PSD/model snapshot."); end
+            if app.CancelRequested, return; end
+            app.Config = snapshot.cfg; app.CleanData = fullClean; app.ArtifactResult = fullArtifact; app.AnalysisData = analysisData;
+            app.BeforePsd = beforePsd; app.PsdResult = psd; app.ModelResult = model; app.BandResult = band; app.LastRunSnapshot = snapshot; app.LastRunError = "";
+            app.Cache = struct('artifactValid', ~isempty(fieldnames(fullArtifact)), 'psdValid', ~isempty(fieldnames(psd)), 'modelValid', ~isempty(model), 'bandValid', ~isempty(fieldnames(band)), 'plotValid', true);
+            app.AppState.currentResults = struct('artifact', app.ArtifactResult, 'psd', app.PsdResult, 'model', {app.ModelResult}, 'band', app.BandResult);
+            app.saveCurrentDataset(); app.refreshDatasetTable(); app.renderAll();
+            if snapshot.autoSave, app.autoSaveResults(snapshot); end
+        end
+
         function buildUi(app, visible)
             app.Figure = uifigure('Name', 'SceneRay LFP 分析工具', 'NumberTitle', 'off', ...
-                'Color', [0.96 0.96 0.96], 'Position', [80 60 1560 940], ...
+                'Color', [0.96 0.96 0.96], 'Position', [60 40 1760 1000], ...
                 'Visible', char(visible), 'CloseRequestFcn', @(src,event)app.closeApp(src,event));
             outer = uigridlayout(app.Figure, [3 3]);
             outer.RowHeight = {44, '1x', 38};
-            outer.ColumnWidth = {300, 360, '1x'};
-            outer.Padding = [6 6 6 6];
+            outer.ColumnWidth = {360, 410, '1x'};
+            outer.Padding = app.UiStyle.panelPadding;
 
             toolbar = uipanel(outer, 'BorderType', 'none'); toolbar.Layout.Row = 1; toolbar.Layout.Column = [1 3];
-            tg = uigridlayout(toolbar, [1 7]); tg.ColumnWidth = {100, 100, 100, 100, 150, '1x', 140}; tg.Padding = [0 0 0 0];
-            app.Controls.ImportButton = uibutton(tg, 'Text', '导入 CSV', 'ButtonPushedFcn', @(s,e)app.onImport(s,e));
+            tg = uigridlayout(toolbar, [1 7]); tg.ColumnWidth = {120, 120, 120, 120, 180, '1x', 190}; tg.Padding = [0 0 0 0];
+            app.Controls.ImportButton = uibutton(tg, 'Text', '导入 CSV（可多选）', 'ButtonPushedFcn', @(s,e)app.onImport(s,e));
             app.Controls.LoadConfigButton = uibutton(tg, 'Text', '加载配置', 'ButtonPushedFcn', @(s,e)app.onLoadConfig(s,e));
             app.Controls.SaveConfigButton = uibutton(tg, 'Text', '保存配置', 'ButtonPushedFcn', @(s,e)app.onSaveConfig(s,e));
-            app.Controls.SaveResultsButton = uibutton(tg, 'Text', '保存结果', 'ButtonPushedFcn', @(s,e)app.onSaveResults(s,e));
+            app.Controls.SaveResultsButton = uibutton(tg, 'Text', '保存当前结果', 'ButtonPushedFcn', @(s,e)app.onSaveResults(s,e));
             app.Controls.StatusLabel = uilabel(tg, 'Text', '未加载数据', 'HorizontalAlignment', 'center');
-            app.Controls.FileLabel = uilabel(tg, 'Text', '', 'HorizontalAlignment', 'left');
+            app.Controls.FileLabel = uilabel(tg, 'Text', '', 'HorizontalAlignment', 'left', 'WordWrap', 'on');
             app.Controls.DependencyLabel = uilabel(tg, 'Text', '', 'HorizontalAlignment', 'right');
 
             left = uipanel(outer, 'Title', '数据与运行'); left.Layout.Row = 2; left.Layout.Column = 1;
-            lg = uigridlayout(left, [8 1]); lg.RowHeight = {105, 145, 50, 50, 120, 30, 30, '1x'}; lg.Padding = [5 5 5 5];
-            app.Controls.InfoArea = uitextarea(lg, 'Editable', 'off', 'Value', {'未加载数据'});
+            lg = uigridlayout(left, [11 1]); lg.RowHeight = {150, 34, 92, 110, 50, 50, 120, 30, 30, 30, '1x'}; lg.Padding = app.UiStyle.panelPadding;
+            app.Controls.DatasetTable = uitable(lg, 'Data', cell(0,5), 'ColumnName', {'选择','文件名','通道数','采样率 (Hz)','状态'}, ...
+                'ColumnEditable', [true false false false false], 'ColumnFormat', {'logical','char','numeric','numeric','char'}, ...
+                'CellEditCallback', @(s,e)app.onDatasetTableEdit(s,e)); app.Controls.DatasetTable.Layout.Row = 1;
+            datasetButtons = uigridlayout(lg, [1 4]); datasetButtons.ColumnWidth = {'1x','1x','1x','1x'}; datasetButtons.Layout.Row = 2;
+            app.Controls.DatasetSelectAllButton = uibutton(datasetButtons, 'Text', '全选', 'ButtonPushedFcn', @(s,e)app.selectAllDatasets(s,e));
+            app.Controls.DatasetClearButton = uibutton(datasetButtons, 'Text', '清除选择', 'ButtonPushedFcn', @(s,e)app.clearDatasetSelection(s,e));
+            app.Controls.DatasetDeleteButton = uibutton(datasetButtons, 'Text', '删除', 'ButtonPushedFcn', @(s,e)app.deleteSelectedDatasets(s,e));
+            app.Controls.DatasetInfoButton = uibutton(datasetButtons, 'Text', '查看信息', 'ButtonPushedFcn', @(s,e)app.showSelectedDatasetInfo(s,e));
+            app.Controls.InfoArea = uitextarea(lg, 'Editable', 'off', 'Value', {'未加载数据'}, 'WordWrap', 'on'); app.Controls.InfoArea.Layout.Row = 3;
             app.Controls.ChannelList = uilistbox(lg, 'Multiselect', 'on', 'Items', {'(未加载)'}, 'Value', {'(未加载)'}, ...
-                'ValueChangedFcn', @(s,e)app.onChannelChanged(s,e));
-            app.Controls.AnalysisRangePanel = uipanel(lg, 'Title', '分析时间范围 (s)');
-            ar = uigridlayout(app.Controls.AnalysisRangePanel, [1 4]); ar.ColumnWidth = {36, 90, 36, 90};
+                'ValueChangedFcn', @(s,e)app.onChannelChanged(s,e)); app.Controls.ChannelList.Layout.Row = 4;
+            app.Controls.AnalysisRangePanel = uipanel(lg, 'Title', '分析时间范围 (s)'); app.Controls.AnalysisRangePanel.Layout.Row = 5;
+            ar = uigridlayout(app.Controls.AnalysisRangePanel, [1 4]); ar.ColumnWidth = {42, '1x', 42, '1x'};
             uilabel(ar, 'Text', '起始'); app.Controls.AnalysisStart = uieditfield(ar, 'numeric', 'Value', 0, 'ValueChangedFcn', @(s,e)app.markChanged('data'));
             uilabel(ar, 'Text', '结束'); app.Controls.AnalysisEnd = uieditfield(ar, 'numeric', 'Value', 0, 'ValueChangedFcn', @(s,e)app.markChanged('data'));
-            app.Controls.DisplayRangePanel = uipanel(lg, 'Title', '波形显示范围 (s)');
-            dr = uigridlayout(app.Controls.DisplayRangePanel, [1 4]); dr.ColumnWidth = {36, 90, 36, 90};
+            app.Controls.DisplayRangePanel = uipanel(lg, 'Title', '波形显示范围 (s)'); app.Controls.DisplayRangePanel.Layout.Row = 6;
+            dr = uigridlayout(app.Controls.DisplayRangePanel, [1 4]); dr.ColumnWidth = {42, '1x', 42, '1x'};
             uilabel(dr, 'Text', '起始'); app.Controls.DisplayStart = uieditfield(dr, 'numeric', 'Value', 0, 'ValueChangedFcn', @(s,e)app.markChanged('plot'));
             uilabel(dr, 'Text', '结束'); app.Controls.DisplayEnd = uieditfield(dr, 'numeric', 'Value', 0, 'ValueChangedFcn', @(s,e)app.markChanged('plot'));
-            modulePanel = uipanel(lg, 'Title', '分析模块'); mg = uigridlayout(modulePanel, [4 1]);
+            modulePanel = uipanel(lg, 'Title', '分析模块'); modulePanel.Layout.Row = 7; mg = uigridlayout(modulePanel, [4 1]); mg.RowHeight = {28,28,40,28};
             app.Controls.ArtifactCheck = uicheckbox(mg, 'Text', '伪迹检测/标记', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('artifact'));
             app.Controls.PsdCheck = uicheckbox(mg, 'Text', 'PSD', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('psd'));
-            app.Controls.FooofCheck = uicheckbox(mg, 'Text', 'specparam（原FOOOF）周期/非周期拟合', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('model'));
+            app.Controls.FooofCheck = uicheckbox(mg, 'Text', 'specparam 周期/非周期拟合', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('model'));
             app.Controls.BandCheck = uicheckbox(mg, 'Text', '频段功率', 'Value', true, 'ValueChangedFcn', @(s,e)app.markChanged('band'));
-            autoPanel = uipanel(lg, 'BorderType', 'none'); ag = uigridlayout(autoPanel, [1 1]);
-            app.Controls.AutoSaveCheck = uicheckbox(ag, 'Text', '运行成功后自动保存到输出目录', 'Value', false);
-            outputPanel = uipanel(lg, 'BorderType', 'none'); og = uigridlayout(outputPanel, [1 2]); og.ColumnWidth = {'1x', 70};
+            autoPanel = uipanel(lg, 'BorderType', 'none'); autoPanel.Layout.Row = 8; ag = uigridlayout(autoPanel, [1 1]);
+            app.Controls.AutoSaveCheck = uicheckbox(ag, 'Text', '成功后自动保存结果', 'Value', false);
+            outputPanel = uipanel(lg, 'BorderType', 'none'); outputPanel.Layout.Row = 9; og = uigridlayout(outputPanel, [1 2]); og.ColumnWidth = {'1x', 70};
             app.Controls.OutputFolder = uieditfield(og, 'text', 'Value', 'results');
             app.Controls.BrowseOutputButton = uibutton(og, 'Text', '浏览', 'ButtonPushedFcn', @(s,e)app.onBrowseOutput(s,e));
-            app.Controls.LogArea = uitextarea(lg, 'Editable', 'off', 'Value', {'日志：'});
+            app.Controls.LogArea = uitextarea(lg, 'Editable', 'off', 'Value', {'日志：'}, 'WordWrap', 'on'); app.Controls.LogArea.Layout.Row = [10 11];
 
             middle = uipanel(outer, 'Title', '参数（修改后需重新运行）'); middle.Layout.Row = 2; middle.Layout.Column = 2;
             app.buildParameterTabs(middle);
@@ -414,7 +701,7 @@ classdef LfpApp < handle
         function buildParameterTabs(app, parent)
             tabs = uitabgroup(parent); app.Tabs.Parameter = tabs;
             artifactTab = uitab(tabs, 'Title', '伪迹');
-            g = uigridlayout(artifactTab, [12 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 12);
+            g = uigridlayout(artifactTab, [12 2]); g.ColumnWidth = {190, '1x'}; g.RowHeight = repmat({32}, 1, 12);
             app.Controls.ArtifactMethod = app.addDropDown(g, 1, '方法', {'native'}, 'native', 'artifact');
             app.Controls.ArtifactAmplitudeZ = app.addNumeric(g, 2, '振幅阈值 (z)', app.Config.artifact.amplitudeZ, 'artifact');
             app.Controls.ArtifactDerivativeZ = app.addNumeric(g, 3, '跳变阈值 (z)', app.Config.artifact.derivativeZ, 'artifact');
@@ -430,7 +717,7 @@ classdef LfpApp < handle
             app.Controls.ArtifactMethodStatus = uilabel(g, 'Text', ''); app.Controls.ArtifactMethodStatus.Layout.Row = 12; app.Controls.ArtifactMethodStatus.Layout.Column = [1 3];
 
             psdTab = uitab(tabs, 'Title', 'PSD + 时频');
-            g = uigridlayout(psdTab, [23 2]); g.ColumnWidth = {180, '1x'}; g.RowHeight = repmat({26}, 1, 23);
+            g = uigridlayout(psdTab, [23 2]); g.ColumnWidth = {200, '1x'}; g.RowHeight = repmat({32}, 1, 23);
             app.Controls.PsdMethod = app.addDropDown(g, 1, 'PSD 方法', {'welch', 'multitaper'}, char(app.Config.psd.method), 'psd');
             app.Controls.PsdMethod.ValueChangedFcn = @(s,e)app.onPsdMethodChanged(s,e);
             app.Controls.PsdWindow = app.addNumeric(g, 2, '窗长 T (s)', app.Config.psd.windowLengthSec, 'psd');
@@ -459,7 +746,7 @@ classdef LfpApp < handle
             app.Controls.PsdInfo = uilabel(g, 'Text', ''); app.Controls.PsdInfo.Layout.Row = 23; app.Controls.PsdInfo.Layout.Column = [1 3];
 
             fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）');
-            g = uigridlayout(fooofTab, [10 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 10);
+            g = uigridlayout(fooofTab, [10 2]); g.ColumnWidth = {190, '1x'}; g.RowHeight = repmat({32}, 1, 10);
             app.Controls.FooofFreqLow = app.addNumeric(g, 1, '拟合下限 (Hz)', app.Config.fooof.frequencyRange(1), 'model');
             app.Controls.FooofFreqHigh = app.addNumeric(g, 2, '拟合上限 (Hz)', app.Config.fooof.frequencyRange(2), 'model');
             app.Controls.FooofWidthLow = app.addNumeric(g, 3, '峰宽下限 (Hz)', app.Config.fooof.peakWidthLimits(1), 'model');
@@ -490,7 +777,7 @@ classdef LfpApp < handle
             label = uilabel(bg, 'Text', '背景校正功率与原始总功率分开保存'); label.Layout.Row = 4; label.Layout.Column = [1 3];
 
             plotTab = uitab(tabs, 'Title', '绘图');
-            g = uigridlayout(plotTab, [8 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 8);
+            g = uigridlayout(plotTab, [8 2]); g.ColumnWidth = {190, '1x'}; g.RowHeight = repmat({32}, 1, 8);
             app.Controls.PlotFreqLow = app.addNumeric(g, 1, '显示频率下限 (Hz)', app.Config.plot.frequencyRange(1), 'plot');
             app.Controls.PlotFreqHigh = app.addNumeric(g, 2, '显示频率上限 (Hz)', app.Config.plot.frequencyRange(2), 'plot');
             app.Controls.PlotMaxSeconds = app.addNumeric(g, 3, '最大显示时长 (s)', app.Config.plot.maxPlotSeconds, 'plot');
@@ -504,42 +791,91 @@ classdef LfpApp < handle
         function buildResultTabs(app, parent)
             tabs = uitabgroup(parent); app.Tabs.Results = tabs;
             rawTab = uitab(tabs, 'Title', '原始与伪迹');
-            g = uigridlayout(rawTab, [3 1]); g.RowHeight = {'1x', '1x', 150};
-            app.Controls.RawAxes = uiaxes(g); title(app.Controls.RawAxes, 'Raw signal'); grid(app.Controls.RawAxes, 'on');
-            app.Controls.CleanAxes = uiaxes(g); title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
-            app.Controls.ArtifactTable = uitable(g, 'ColumnName', {'artifactType','startSample','endSample','startTime','endTime','channel','score','threshold','method'});
-
-            psdTab = uitab(tabs, 'Title', 'PSD + 时频'); g = uigridlayout(psdTab, [4 1]); g.RowHeight = {28, '1x', '1x', 70};
-            app.Controls.PsdTFRChannel = uidropdown(g, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+            g = uigridlayout(rawTab, [4 1]); g.RowHeight = {34, '1x', '1x', 150};
+            rawControls = uigridlayout(g, [1 6]); rawControls.Layout.Row = 1; rawControls.ColumnWidth = {170, 170, 120, '1x', 92, 92};
+            app.Controls.RawDatasetDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
+            app.Controls.RawChannelDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onResultChannelChanged(s,e));
+            app.Controls.RawOverlayMode = uidropdown(rawControls, 'Items', {'叠加', '单独显示'}, 'Value', '叠加', ...
                 'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
-            app.Controls.PsdAxes = uiaxes(g); grid(app.Controls.PsdAxes, 'on');
-            app.Controls.PsdTimeFrequencyAxes = uiaxes(g); grid(app.Controls.PsdTimeFrequencyAxes, 'on');
-            app.Controls.PsdInfoResult = uitextarea(g, 'Editable', 'off', 'Value', {'尚未计算 PSD'});
+            uilabel(rawControls, 'Text', '选择数据集和通道；红色区域为伪迹标记', 'WordWrap', 'on');
+            app.Controls.RawSaveFigure = uibutton(rawControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("raw",e));
+            app.Controls.RawSaveData = uibutton(rawControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("raw",e));
+            app.Controls.RawAxes = uiaxes(g); app.Controls.RawAxes.Layout.Row=2; title(app.Controls.RawAxes, 'Raw signal'); grid(app.Controls.RawAxes, 'on');
+            app.Controls.CleanAxes = uiaxes(g); app.Controls.CleanAxes.Layout.Row=3; title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
+            app.Controls.ArtifactTable = uitable(g, 'ColumnName', {'artifactType','startSample','endSample','startTime','endTime','channel','score','threshold','method'}); app.Controls.ArtifactTable.Layout.Row=4;
 
-            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [2 1]); g.RowHeight = {'1x', 170};
-            app.Controls.FooofAxes = uiaxes(g); grid(app.Controls.FooofAxes, 'on');
-            app.Controls.FooofTable = uitable(g, 'ColumnName', {'CF_Hz','PW_log10','BW_Hz','peakBand'});
+            psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [3 1]); g.RowHeight = {36, '1x', 70};
+            psdControls = uigridlayout(g, [1 7]); psdControls.Layout.Row = 1; psdControls.ColumnWidth = {150, 150, 110, 135, '1x', 92, 92};
+            app.Controls.PsdDatasetDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
+            app.Controls.PsdChannelDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onResultChannelChanged(s,e));
+            app.Controls.PsdViewMode = uidropdown(psdControls, 'Items', {'单通道', '多通道', 'subplot'}, 'Value', '多通道', ...
+                'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
+            app.Controls.PsdShowBefore = uicheckbox(psdControls, 'Text', '显示伪迹前 PSD', 'Value', false, ...
+                'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
+            uilabel(psdControls, 'Text', '处理后 PSD 默认显示；线型保持可比较', 'WordWrap', 'on');
+            app.Controls.PsdSaveFigure = uibutton(psdControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("psd",e));
+            app.Controls.PsdSaveData = uibutton(psdControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("psd",e));
+            app.Controls.PsdPlotPanel = uipanel(g, 'BorderType', 'none'); app.Controls.PsdPlotPanel.Layout.Row=2;
+            app.Controls.PsdAxes = uiaxes(app.Controls.PsdPlotPanel); app.Controls.PsdAxes.Position=[10 10 700 420]; grid(app.Controls.PsdAxes, 'on');
+            app.Controls.PsdInfoResult = uitextarea(g, 'Editable', 'off', 'Value', {'尚未计算 PSD'}); app.Controls.PsdInfoResult.Layout.Row=3;
 
-            bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [2 1]); g.RowHeight = {'1x', 170};
-            app.Controls.BandPlotPanel = uipanel(g, 'BorderType', 'none');
+            tfTab = uitab(tabs, 'Title', '时频分析'); g = uigridlayout(tfTab, [3 1]); g.RowHeight = {36, '1x', 28};
+            tfControls = uigridlayout(g, [1 8]); tfControls.Layout.Row = 1; tfControls.ColumnWidth = {145, 145, 120, 100, 100, '1x', 92, 92};
+            app.Controls.TfDatasetDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
+            app.Controls.TfChannelDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onResultChannelChanged(s,e));
+            app.Controls.TfColorMode = uidropdown(tfControls, 'Items', {'自动（5%-95%）', '自动（最小-最大）', '手动'}, 'Value', '自动（5%-95%）', ...
+                'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
+            app.Controls.TfColorLow = uieditfield(tfControls, 'numeric', 'Value', -5, 'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
+            app.Controls.TfColorHigh = uieditfield(tfControls, 'numeric', 'Value', 1, 'ValueChangedFcn', @(s,e)app.onRedraw(s,e));
+            uilabel(tfControls, 'Text', '色限：自动采用稳健百分位；功率单位见 colorbar', 'WordWrap', 'on');
+            app.Controls.TfSaveFigure = uibutton(tfControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("timeFrequency",e));
+            app.Controls.TfSaveData = uibutton(tfControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("timeFrequency",e));
+            app.Controls.PsdTimeFrequencyAxes = uiaxes(g); app.Controls.PsdTimeFrequencyAxes.Layout.Row=2; grid(app.Controls.PsdTimeFrequencyAxes, 'on');
+            app.Controls.TfInfoResult = uilabel(g, 'Text', '尚未计算时频结果', 'WordWrap', 'on'); app.Controls.TfInfoResult.Layout.Row=3;
+
+            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [3 1]); g.RowHeight = {34, '1x', 170};
+            fooofControls = uigridlayout(g, [1 5]); fooofControls.Layout.Row = 1; fooofControls.ColumnWidth = {180, 180, '1x', 92, 92};
+            app.Controls.FooofDatasetDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
+            app.Controls.FooofChannelDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
+                'ValueChangedFcn', @(s,e)app.onResultChannelChanged(s,e));
+            uilabel(fooofControls, 'Text', '显示单通道模型与 Gaussian 峰分解', 'WordWrap', 'on');
+            app.Controls.FooofSaveFigure = uibutton(fooofControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("specparam",e));
+            app.Controls.FooofSaveData = uibutton(fooofControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("specparam",e));
+            app.Controls.FooofAxes = uiaxes(g); app.Controls.FooofAxes.Layout.Row=2; grid(app.Controls.FooofAxes, 'on');
+            app.Controls.FooofTable = uitable(g, 'ColumnName', {'CF_Hz','PW_log10','BW_Hz','peakBand'}); app.Controls.FooofTable.Layout.Row=3;
+
+            bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [3 1]); g.RowHeight = {34, '1x', 170};
+            bandControls = uigridlayout(g, [1 3]); bandControls.Layout.Row = 1; bandControls.ColumnWidth = {'1x', 92, 92};
+            uilabel(bandControls, 'Text', '按频段或通道查看功率；多数据集比较使用 grouped bar', 'WordWrap', 'on');
+            app.Controls.BandSaveFigure = uibutton(bandControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("band",e));
+            app.Controls.BandSaveData = uibutton(bandControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("band",e));
+            app.Controls.BandPlotPanel = uipanel(g, 'BorderType', 'none'); app.Controls.BandPlotPanel.Layout.Row = 2;
             app.Controls.BandAxes = uiaxes(app.Controls.BandPlotPanel); app.Controls.BandAxes.Position = [10 10 500 300]; grid(app.Controls.BandAxes, 'on');
-            app.Controls.BandResultTable = uitable(g);
+            app.Controls.BandResultTable = uitable(g); app.Controls.BandResultTable.Layout.Row = 3;
         end
 
         function control = addNumeric(app, grid, row, labelText, value, stage)
-            label = uilabel(grid, 'Text', labelText); label.Layout.Row = row; label.Layout.Column = 1;
+            label = uilabel(grid, 'Text', labelText, 'FontSize', app.UiStyle.labelFontSize, 'WordWrap', 'on'); label.Layout.Row = row; label.Layout.Column = 1;
             control = uieditfield(grid, 'numeric', 'Value', value, 'ValueChangedFcn', @(s,e)app.markChanged(stage));
             control.Layout.Row = row; control.Layout.Column = 2;
         end
 
         function control = addDropDown(app, grid, row, labelText, items, value, stage)
-            label = uilabel(grid, 'Text', labelText); label.Layout.Row = row; label.Layout.Column = 1;
+            label = uilabel(grid, 'Text', labelText, 'FontSize', app.UiStyle.labelFontSize, 'WordWrap', 'on'); label.Layout.Row = row; label.Layout.Column = 1;
             control = uidropdown(grid, 'Items', items, 'Value', value, 'ValueChangedFcn', @(s,e)app.markChanged(stage));
             control.Layout.Row = row; control.Layout.Column = 2;
         end
 
         function control = addCheck(app, grid, row, labelText, value, stage)
-            control = uicheckbox(grid, 'Text', labelText, 'Value', value, 'ValueChangedFcn', @(s,e)app.markChanged(stage));
+            control = uicheckbox(grid, 'Text', labelText, 'Value', value, 'FontSize', app.UiStyle.labelFontSize, 'ValueChangedFcn', @(s,e)app.markChanged(stage));
+            if isprop(control, 'WordWrap'), control.WordWrap = 'on'; end
             control.Layout.Row = row; control.Layout.Column = [1 3];
         end
 
@@ -625,28 +961,6 @@ classdef LfpApp < handle
             catch exception
                 uialert(dialog, string(exception.message), '导入失败');
             end
-        end
-
-        function setData(app, data)
-            if ~isfield(data.metadata, 'sourceFilePath'), data.metadata.sourceFilePath = ""; end
-            if ~isfield(data.metadata, 'displayName')
-                data.metadata.displayName = string(data.metadata.sourceFileName);
-            end
-            app.Data = data;
-            app.CleanData = struct(); app.AnalysisData = struct(); app.ArtifactResult = struct();
-            app.BeforePsd = struct(); app.PsdResult = struct(); app.ModelResult = struct([]); app.BandResult = struct();
-            app.Cache = struct('artifactValid', false, 'psdValid', false, 'modelValid', false, 'bandValid', false, 'plotValid', false);
-            labels = string(data.channelLabels(:));
-            app.Controls.ChannelList.Items = cellstr(labels);
-            app.Controls.ChannelList.Value = cellstr(labels);
-            [timeStart, timeEnd] = app.timeBounds(data);
-            app.Controls.AnalysisStart.Value = timeStart; app.Controls.AnalysisEnd.Value = timeEnd;
-            app.Controls.DisplayStart.Value = timeStart; app.Controls.DisplayEnd.Value = timeEnd;
-            app.Controls.FileLabel.Text = string(data.metadata.displayName);
-            app.updateDataInfo();
-            app.renderRaw();
-            app.invalidateAll("已加载新数据，请运行所选分析。");
-            app.logMessage("已导入 " + string(data.metadata.displayName) + "（" + string(size(data.signal,2)) + " 通道）", "info");
         end
 
         function updateDataInfo(app)
@@ -785,6 +1099,7 @@ classdef LfpApp < handle
 
         function markChanged(app, stage)
             if app.IsRunning, return; end
+            app.AppState.selectedAnalysis = string(stage);
             if strcmp(stage, 'plot')
                 app.Cache.plotValid = false;
                 app.setStatus('绘图参数已变更，可点击“重新绘图”。', 'warning');
@@ -942,7 +1257,7 @@ classdef LfpApp < handle
         end
 
         function renderAll(app)
-            app.renderRaw(); app.renderPsd(); app.renderFooof(); app.renderBand();
+            app.renderRaw(); app.renderPsd(); app.renderTimeFrequency(); app.renderFooof(); app.renderBand();
         end
 
         function renderRaw(app)
@@ -972,6 +1287,30 @@ classdef LfpApp < handle
             app.updateArtifactTable();
         end
 
+        function ensureSinglePsdAxes(app)
+            if ~isfield(app.Controls, 'PsdPlotPanel') || ~isgraphics(app.Controls.PsdPlotPanel), return; end
+            axesHandles = findall(app.Controls.PsdPlotPanel, 'Type', 'uiaxes');
+            if numel(axesHandles) == 1
+                app.Controls.PsdAxes = axesHandles(1); return;
+            end
+            delete(app.Controls.PsdPlotPanel.Children);
+            app.Controls.PsdAxes = uiaxes(app.Controls.PsdPlotPanel); app.Controls.PsdAxes.Position=[10 10 700 420]; grid(app.Controls.PsdAxes, 'on');
+        end
+
+        function renderPsdSubplots(app, p, before, channels, labels)
+            delete(app.Controls.PsdPlotPanel.Children);
+            nRows=max(1,ceil(numel(channels)/2)); layout=uigridlayout(app.Controls.PsdPlotPanel,[nRows 2]); layout.RowHeight=repmat({'1x'},1,nRows); layout.ColumnWidth={'1x','1x'}; layout.Padding=[4 4 4 4];
+            freq=p.frequencyHz; colors=lines(max(numel(channels),1)); axesHandles=gobjects(numel(channels),1);
+            for k=1:numel(channels)
+                ax=uiaxes(layout); axesHandles(k)=ax; hold(ax,'on'); [values,label]=app.displayPower(p.psd(:,channels(k))); plot(ax,freq,values,'-','Color',colors(k,:),'DisplayName','After');
+                if isfield(app.Controls,'PsdShowBefore') && app.Controls.PsdShowBefore.Value && ~isempty(fieldnames(before)) && isfield(before,'psd') && isequal(size(before.psd),size(p.psd))
+                    [old,~]=app.displayPower(before.psd(:,channels(k))); plot(ax,freq,old,':','Color',[.55 .55 .55],'DisplayName','Before');
+                end
+                xlabel(ax,'Frequency (Hz)'); ylabel(ax,label); title(ax,labels(channels(k)),'Interpreter','none'); grid(ax,'on'); legend(ax,'Location','best'); app.applyFrequencyLimits(ax,freq); hold(ax,'off');
+            end
+            if ~isempty(axesHandles), app.Controls.PsdAxes=axesHandles(1); end
+        end
+
         function addArtifactPatches(app, ax, index, yLimits, timeVector)
             if isempty(fieldnames(app.ArtifactResult)) || ~isfield(app.ArtifactResult,'globalMask') || numel(app.ArtifactResult.globalMask) < max(index), return; end
             mask=app.ArtifactResult.globalMask(index); starts=find(diff([false;mask(:);false])==1); ends=find(diff([false;mask(:);false])==-1)-1;
@@ -989,59 +1328,108 @@ classdef LfpApp < handle
         end
 
         function renderPsd(app)
-            cla(app.Controls.PsdAxes); cla(app.Controls.PsdTimeFrequencyAxes);
-            if isempty(fieldnames(app.PsdResult)), app.Controls.PsdInfoResult.Value={'尚未计算 PSD'}; return; end
-            p=app.PsdResult; ch=app.selectedChannels(); ch=ch(ch<=size(p.psd,2)); if isempty(ch), ch=1:size(p.psd,2); end;
+            if isempty(fieldnames(app.PsdResult)), app.ensureSinglePsdAxes(); cla(app.Controls.PsdAxes); app.Controls.PsdInfoResult.Value={'尚未计算 PSD'}; return; end
+            p=app.PsdResult; labels=string(get_field_local(p,'channelLabels',app.Data.channelLabels(:))); labels=labels(:);
+            mode = "多通道"; if isfield(app.Controls,'PsdViewMode'), mode=string(app.Controls.PsdViewMode.Value); end
+            if mode == "单通道" && isfield(app.Controls,'PsdChannelDropDown')
+                ch = app.channelIndexFromControl(app.Controls.PsdChannelDropDown, labels);
+            else
+                ch=app.selectedChannels(); ch=ch(ch<=size(p.psd,2)); if isempty(ch), ch=1:size(p.psd,2); end
+            end
+            if mode == "subplot" && numel(ch) > 1
+                app.renderPsdSubplots(p, app.BeforePsd, ch, labels);
+                app.Controls.PsdInfoResult.Value={sprintf('方法：%s | 显示模式：subplot | 通道数：%d | 频率点：%d',p.method,numel(ch),numel(p.frequencyHz)),sprintf('有效窗口：%s；功率单位：%s',mat2str(p.windowCount),p.psdUnits)};
+                return;
+            end
+            app.ensureSinglePsdAxes(); cla(app.Controls.PsdAxes);
             freq=p.frequencyHz; before=app.BeforePsd; hold(app.Controls.PsdAxes,'on');
             [afterValues, powerLabel] = app.displayPower(p.psd(:,ch));
-            if ~isempty(fieldnames(before)) && isfield(before,'psd') && isequal(size(before.psd),size(p.psd)), [beforeValues, ~] = app.displayPower(before.psd(:,ch)); app.plotSpectrum(app.Controls.PsdAxes, freq, beforeValues, ':', [0.6 0.6 0.6], 'Before artifact exclusion'); end
-            app.plotSpectrum(app.Controls.PsdAxes, freq, afterValues, '-', [0.1 0.25 0.8], 'After artifact exclusion'); hold(app.Controls.PsdAxes,'off');
-            app.applyFrequencyLimits(app.Controls.PsdAxes, freq); xlabel(app.Controls.PsdAxes,'Frequency (Hz)'); ylabel(app.Controls.PsdAxes,powerLabel); title(app.Controls.PsdAxes, app.displayTitle('PSD')); grid(app.Controls.PsdAxes,'on'); legend(app.Controls.PsdAxes,'Location','best');
-            if isfield(p, 'timeFrequency') && isstruct(p.timeFrequency) && isfield(p.timeFrequency, 'power')
-                tf = p.timeFrequency;
-                labels = string(p.channelLabels(:));
-                if isempty(labels), labels = "channel_" + string(1:size(tf.power,3)); end
-                app.Controls.PsdTFRChannel.Items = cellstr(labels);
-                selectedLabel = string(app.Controls.PsdTFRChannel.Value);
-                tfChannel = find(labels == selectedLabel, 1); if isempty(tfChannel), tfChannel = 1; app.Controls.PsdTFRChannel.Value = char(labels(1)); end
-                values = tf.power(:, :, min(tfChannel, size(tf.power,3)));
-                if string(get_field_local(tf, 'powerScale', "linear")) == "log10", values = log10(max(values, realmin));
-                elseif string(get_field_local(tf, 'powerScale', "linear")) == "dB", values = 10*log10(max(values, realmin)); end
-                imagesc(app.Controls.PsdTimeFrequencyAxes, tf.timeSeconds, tf.frequencyHz, values);
-                axis(app.Controls.PsdTimeFrequencyAxes, 'xy'); colorbar(app.Controls.PsdTimeFrequencyAxes);
-                xlabel(app.Controls.PsdTimeFrequencyAxes,'Time (s)'); ylabel(app.Controls.PsdTimeFrequencyAxes,'Frequency (Hz)');
-                title(app.Controls.PsdTimeFrequencyAxes, sprintf('时频功率 | %s | %s', labels(tfChannel), tf.method), 'Interpreter','none');
-                app.applyFrequencyLimits(app.Controls.PsdTimeFrequencyAxes, tf.frequencyHz);
-            else
-                title(app.Controls.PsdTimeFrequencyAxes, '时频结果未计算');
+            if isfield(app.Controls,'PsdShowBefore') && app.Controls.PsdShowBefore.Value && ~isempty(fieldnames(before)) && isfield(before,'psd') && isequal(size(before.psd),size(p.psd))
+                [beforeValues, ~] = app.displayPower(before.psd(:,ch));
+                for k=1:numel(ch), app.plotSpectrum(app.Controls.PsdAxes, freq, beforeValues(:,k), ':', [0.55 0.55 0.55], 'Before | '+labels(ch(k))); end
             end
-            app.Controls.PsdInfoResult.Value={sprintf('方法：%s | 频率点：%d | Δf=%.6g Hz',p.method,numel(freq),p.frequencyResolutionHz),sprintf('有效窗口：%s',mat2str(p.windowCount)),sprintf('PSD 范围：[%.3g %.3g] Hz；功率单位：%s',freq(1),freq(end),p.psdUnits)};
+            colors=lines(max(numel(ch),1));
+            for k=1:numel(ch), app.plotSpectrum(app.Controls.PsdAxes, freq, afterValues(:,k), '-', colors(k,:), 'After | '+labels(ch(k))); end
+            hold(app.Controls.PsdAxes,'off'); app.applyFrequencyLimits(app.Controls.PsdAxes, freq); xlabel(app.Controls.PsdAxes,'Frequency (Hz)'); ylabel(app.Controls.PsdAxes,powerLabel); title(app.Controls.PsdAxes, app.displayTitle('PSD')); grid(app.Controls.PsdAxes,'on'); legend(app.Controls.PsdAxes,'Location','best','Interpreter','none');
+            app.Controls.PsdInfoResult.Value={sprintf('方法：%s | 显示模式：%s | 频率点：%d | Δf=%.6g Hz',p.method,mode,numel(freq),p.frequencyResolutionHz),sprintf('有效窗口：%s',mat2str(p.windowCount)),sprintf('PSD 范围：[%.3g %.3g] Hz；功率单位：%s',freq(1),freq(end),p.psdUnits)};
+        end
+
+        function renderTimeFrequency(app)
+            if ~isfield(app.Controls, 'PsdTimeFrequencyAxes') || ~isgraphics(app.Controls.PsdTimeFrequencyAxes), return; end
+            cla(app.Controls.PsdTimeFrequencyAxes);
+            % MATLAB's headless uiaxes renderer can block on imagesc.  A
+            % hidden GUI is used by automated tests and batch smoke checks;
+            % keep the result state available without attempting a display.
+            if isgraphics(app.Figure) && strcmp(app.Figure.Visible, 'off')
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text='时频结果已计算（隐藏窗口不渲染图像）。'; end
+                return;
+            end
+            if isempty(fieldnames(app.PsdResult)) || ~isfield(app.PsdResult, 'timeFrequency') || ~isstruct(app.PsdResult.timeFrequency) || ~isfield(app.PsdResult.timeFrequency, 'power')
+                title(app.Controls.PsdTimeFrequencyAxes, '尚未计算时频结果');
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text='尚未计算时频结果'; end
+                return;
+            end
+            tf=app.PsdResult.timeFrequency; labels=string(get_field_local(app.PsdResult,'channelLabels',app.Data.channelLabels(:))); labels=labels(:);
+            channel=1; if isfield(app.Controls,'TfChannelDropDown'), channel=app.channelIndexFromControl(app.Controls.TfChannelDropDown,labels); end
+            values=tf.power(:,:,min(channel,size(tf.power,3))); scale=string(get_field_local(tf,'powerScale','linear'));
+            if scale=="log10", displayValues=log10(max(values,realmin)); displayUnit='log10(power)'; elseif scale=="dB", displayValues=10*log10(max(values,realmin)); displayUnit='Power (dB)'; else, displayValues=values; displayUnit=string(get_field_local(tf,'powerUnits','units^2/Hz')); end
+            imagesc(app.Controls.PsdTimeFrequencyAxes, tf.timeSeconds, tf.frequencyHz, displayValues); axis(app.Controls.PsdTimeFrequencyAxes,'xy'); colorbar(app.Controls.PsdTimeFrequencyAxes); xlabel(app.Controls.PsdTimeFrequencyAxes,'Time (s)'); ylabel(app.Controls.PsdTimeFrequencyAxes,'Frequency (Hz)');
+            title(app.Controls.PsdTimeFrequencyAxes, sprintf('时频功率 | %s | %s',labels(channel),get_field_local(tf,'method','unknown')),'Interpreter','none'); app.applyFrequencyLimits(app.Controls.PsdTimeFrequencyAxes,tf.frequencyHz);
+            finite=displayValues(isfinite(displayValues)); mode='auto';
+            if isfield(app.Controls,'TfColorMode'), mode=char(app.Controls.TfColorMode.Value); end
+            if strcmp(mode,'手动') && isfield(app.Controls,'TfColorLow') && isfield(app.Controls,'TfColorHigh')
+                low=app.Controls.TfColorLow.Value; high=app.Controls.TfColorHigh.Value;
+            elseif isempty(finite)
+                low=0; high=1;
+            elseif startsWith(string(mode),'自动（5%')
+                low=percentile_local(finite,5); high=percentile_local(finite,95);
+            else
+                low=min(finite); high=max(finite);
+            end
+            if isfinite(low) && isfinite(high) && high>low, caxis(app.Controls.PsdTimeFrequencyAxes,[low high]); end
+            if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text=sprintf('通道：%s | 方法：%s | 显示：%s | 窗长 %.3g s，步长 %.3g s | 色限 [%.3g %.3g]',labels(channel),get_field_local(tf,'method','unknown'),displayUnit,get_field_local(tf,'windowSeconds',NaN),get_field_local(tf,'stepSeconds',NaN),low,high); end
         end
 
         function renderFooof(app)
             cla(app.Controls.FooofAxes); app.Controls.FooofTable.Data=cell(0,4); if isempty(app.ModelResult), return; end
-            ch=app.selectedChannels(); ch=ch(ch<=numel(app.ModelResult)); if isempty(ch), ch=1; end; m=app.ModelResult(ch(1)); f=m.freq;
+            labels=string(get_field_local(app.PsdResult,'channelLabels',app.Data.channelLabels(:))); labels=labels(:);
+            if isfield(app.Controls,'FooofChannelDropDown'), ch=app.channelIndexFromControl(app.Controls.FooofChannelDropDown,labels); else, ch=app.selectedChannels(); ch=ch(1); end
+            ch=min(max(1,ch),numel(app.ModelResult)); m=app.ModelResult(ch); f=m.freq;
             valid=f>0 & isfinite(m.inputPower) & m.inputPower>0; hold(app.Controls.FooofAxes,'on'); [inputValues, powerLabel] = app.displayPower(m.inputPower); app.plotSpectrum(app.Controls.FooofAxes,f(valid),inputValues(valid),'-',[0 0 0],'Original PSD');
             if any(isfinite(m.fullModelFit)), [fullValues, ~] = app.displayPower(m.fullModelFit); app.plotSpectrum(app.Controls.FooofAxes,f,fullValues,'-',[0.8 0 0],'Full model'); end
             if any(isfinite(m.aperiodicFit)), [aperiodicValues, ~] = app.displayPower(m.aperiodicFit); app.plotSpectrum(app.Controls.FooofAxes,f,aperiodicValues,'--',[0 0.25 0.8],'Aperiodic'); end
             if any(isfinite(m.periodicFit)), [periodicValues, ~] = app.displayPower(m.aperiodicFit+m.periodicFit); app.plotSpectrum(app.Controls.FooofAxes,f,periodicValues,':',[0.1 0.6 0.1],'Periodic-inclusive'); end
+            if isfield(m,'gaussianParams') && ~isempty(m.gaussianParams) && any(isfinite(m.aperiodicFit))
+                gaussianSum = zeros(size(f));
+                peakColors = lines(numel(m.gaussianParams));
+                for peakIndex=1:numel(m.gaussianParams)
+                    g=m.gaussianParams(peakIndex); componentLog=g.amplitudeLog10*exp(-0.5*((f-g.centerFrequencyHz)/g.sigmaHz).^2); gaussianSum=gaussianSum+componentLog;
+                    componentPower=10.^(log10(max(m.aperiodicFit,realmin))+componentLog); app.plotSpectrum(app.Controls.FooofAxes,f,componentPower,'-.',peakColors(peakIndex,:),sprintf('Gaussian %d (CF %.2f Hz)',peakIndex,g.centerFrequencyHz));
+                end
+                sumPower=10.^(log10(max(m.aperiodicFit,realmin))+gaussianSum); app.plotSpectrum(app.Controls.FooofAxes,f,sumPower,'-',[0.1 0.6 0.1],'Sum of Gaussian peaks');
+            end
             xline(app.Controls.FooofAxes,m.fitRange,':','Color',[.4 .4 .4]);
             if ~isempty(m.peakParams), centers=[m.peakParams.CF]; xline(app.Controls.FooofAxes,centers,'--','Color',[.1 .6 .1]); end
             kneeText = '';
             if isfield(m.aperiodicParams, 'knee') && isfinite(m.aperiodicParams.knee), kneeText = sprintf(' | knee %.4g', m.aperiodicParams.knee); end
             modeText = get_field_local(m.aperiodicParams, 'mode', "fixed");
-            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | status=%s | mode=%s | offset %.3f | exponent %.3f%s | R² %.3f | error %.3f',app.displayTitle('specparam（原FOOOF）'),m.fitStatus,modeText,m.aperiodicParams.offset,m.aperiodicParams.exponent,kneeText,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best'); grid(app.Controls.FooofAxes,'on');
+            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | dataset=%s | channel=%s | status=%s | mode=%s | offset %.3f | exponent %.3f%s | R² %.3f | error %.3f',app.displayTitle('specparam（原FOOOF）'),app.currentDatasetName(),labels(ch),m.fitStatus,modeText,m.aperiodicParams.offset,m.aperiodicParams.exponent,kneeText,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best','Interpreter','none'); grid(app.Controls.FooofAxes,'on');
             if ~isempty(m.peakParams), rows=cell(numel(m.peakParams),4); for k=1:numel(m.peakParams), rows{k,1}=m.peakParams(k).CF; rows{k,2}=m.peakParams(k).PW; rows{k,3}=m.peakParams(k).BW; rows{k,4}=char(m.peakParams(k).peakBand); end; app.Controls.FooofTable.Data=rows; end
             app.Controls.FooofTable.ColumnName={'CF_Hz','PW_log10','BW_Hz','peakBand'};
         end
 
         function renderBand(app)
             if isgraphics(app.Controls.BandPlotPanel)
-                delete(findall(app.Controls.BandPlotPanel, 'Type', 'axes'));
+                delete(app.Controls.BandPlotPanel.Children);
             end
             app.Controls.BandResultTable.Data=cell(0,1); if isempty(fieldnames(app.BandResult)) || ~isfield(app.BandResult,'table'), return; end
             tbl=app.BandResult.table; app.Controls.BandResultTable.Data=lfp_table_to_uitable_data(tbl); app.Controls.BandResultTable.ColumnName=tbl.Properties.VariableNames;
             metric=string(app.Controls.BandMetric.Value); names=unique(string(tbl.band),'stable'); chans=unique(tbl.channelIndex,'stable');
+            selectedDatasets = app.selectedDatasetIndices();
+            if numel(selectedDatasets) > 1 && app.hasBandResults(selectedDatasets)
+                app.renderBandGrouped(selectedDatasets, metric);
+                return;
+            end
             facetByBand = string(app.Controls.BandFacet.Value) == "按频段分面";
             if facetByBand, nPlots = numel(names); else, nPlots = numel(chans); end
             nCols = max(1, min(3, nPlots)); nRows = max(1, ceil(nPlots / nCols));
@@ -1063,6 +1451,38 @@ classdef LfpApp < handle
                 ylabel(ax, metric); grid(ax,'on');
             end
             app.Controls.BandAxes = plotAxes(1);
+        end
+
+        function tf = hasBandResults(app, indices)
+            tf = true;
+            for k=1:numel(indices)
+                r=app.Datasets(indices(k)).analysisResults;
+                if ~isfield(r,'bandResult') || ~isstruct(r.bandResult) || ~isfield(r.bandResult,'table') || isempty(r.bandResult.table)
+                    tf=false; return;
+                end
+            end
+        end
+
+        function renderBandGrouped(app, indices, metric)
+            firstTable=app.Datasets(indices(1)).analysisResults.bandResult.table;
+            bandNames=unique(string(firstTable.band),'stable'); channelIndices=unique(firstTable.channelIndex,'stable');
+            nRows=max(1,ceil(numel(bandNames)/2)); panelGrid=uigridlayout(app.Controls.BandPlotPanel,[nRows 2]); panelGrid.RowHeight=repmat({'1x'},1,nRows); panelGrid.ColumnWidth={'1x','1x'}; panelGrid.Padding=[4 4 4 4];
+            axesList=gobjects(numel(bandNames),1); datasetNames=strings(numel(indices),1);
+            for d=1:numel(indices), datasetNames(d)=app.Datasets(indices(d)).fileName; end
+            for b=1:numel(bandNames)
+                ax=uiaxes(panelGrid); axesList(b)=ax; values=NaN(numel(channelIndices),numel(indices));
+                for d=1:numel(indices)
+                    t=app.Datasets(indices(d)).analysisResults.bandResult.table;
+                    for c=1:numel(channelIndices)
+                        row=t.channelIndex==channelIndices(c) & string(t.band)==bandNames(b);
+                        if any(row) && ismember(metric,string(t.Properties.VariableNames)), values(c,d)=t.(metric)(find(row,1)); end
+                    end
+                end
+                bar(ax,values,'grouped'); labels=strings(numel(channelIndices),1);
+                for c=1:numel(channelIndices), row=firstTable.channelIndex==channelIndices(c); labels(c)=string(firstTable.channelLabel(find(row,1))); end
+                ax.XTick=1:numel(channelIndices); ax.XTickLabel=cellstr(labels); xlabel(ax,'Channel'); ylabel(ax,metric); title(ax,bandNames(b),'Interpreter','none'); legend(ax,cellstr(datasetNames),'Interpreter','none','Location','best'); grid(ax,'on');
+            end
+            if ~isempty(axesList), app.Controls.BandAxes=axesList(1); end
         end
 
         function [values, label] = displayPower(app, power)
@@ -1206,4 +1626,12 @@ end
 
 function merged = mergeConfig_local(base, override)
 merged=base; fields=fieldnames(override); for k=1:numel(fields), name=fields{k}; if isstruct(override.(name)) && isfield(base,name) && isstruct(base.(name)), merged.(name)=mergeConfig_local(base.(name),override.(name)); else, merged.(name)=override.(name); end, end
+end
+
+function value = percentile_local(values, percentile)
+values = sort(double(values(:)));
+if isempty(values), value = NaN; return; end
+position = 1 + (numel(values) - 1) * percentile / 100;
+lower = floor(position); upper = ceil(position);
+if lower == upper, value = values(lower); else, value = values(lower) + (position - lower) * (values(upper) - values(lower)); end
 end
