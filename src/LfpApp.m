@@ -639,9 +639,9 @@ classdef LfpApp < handle
             labels = string(data.channelLabels(:));
             app.Controls.ChannelList.Items = cellstr(labels);
             app.Controls.ChannelList.Value = cellstr(labels);
-            duration = (size(data.signal, 1) - 1) / data.fs;
-            app.Controls.AnalysisStart.Value = 0; app.Controls.AnalysisEnd.Value = duration;
-            app.Controls.DisplayStart.Value = 0; app.Controls.DisplayEnd.Value = duration;
+            [timeStart, timeEnd] = app.timeBounds(data);
+            app.Controls.AnalysisStart.Value = timeStart; app.Controls.AnalysisEnd.Value = timeEnd;
+            app.Controls.DisplayStart.Value = timeStart; app.Controls.DisplayEnd.Value = timeEnd;
             app.Controls.FileLabel.Text = string(data.metadata.displayName);
             app.updateDataInfo();
             app.renderRaw();
@@ -653,14 +653,14 @@ classdef LfpApp < handle
             if isempty(fieldnames(app.Data))
                 app.Controls.InfoArea.Value = {'未加载数据'}; return;
             end
-            d = app.Data; n = size(d.signal, 1); c = size(d.signal, 2); duration = (n - 1) / d.fs;
+            d = app.Data; n = size(d.signal, 1); c = size(d.signal, 2); [timeStart, timeEnd] = app.timeBounds(d);
             missing = nnz(~isfinite(d.signal));
             ipg = ""; if isfield(d.metadata, 'ipgSN'), ipg = string(d.metadata.ipgSN); end
             infoLines = [ ...
                 "文件：" + string(d.metadata.sourceFileName); ...
                 "IPG SN：" + ipg; ...
                 string(sprintf('通道数：%d | 样本数：%d', c, n)); ...
-                string(sprintf('采样率：%.6g Hz | 时长：%.3f s', d.fs, duration)); ...
+                string(sprintf('采样率：%.6g Hz | 时间范围：%.3f–%.3f s', d.fs, timeStart, timeEnd)); ...
                 "单位：" + string(d.units); ...
                 string(sprintf('NaN/Inf：%d', missing))];
             % uitextarea.Value requires a string array or an N-by-1 cellstr;
@@ -831,10 +831,10 @@ classdef LfpApp < handle
 
         function validateRun(app, snapshot)
             if isempty(snapshot.channels), error('LFP:NoChannelsSelected', '至少选择一个通道。'); end
-            duration = (size(app.Data.signal,1)-1) / app.Data.fs;
+            [timeStart, timeEnd] = app.timeBounds(app.Data);
             r = snapshot.analysisRange;
-            if numel(r) ~= 2 || any(~isfinite(r)) || r(1) < 0 || r(2) <= r(1) || r(2) > duration + 1/app.Data.fs
-                error('LFP:InvalidAnalysisRange', '分析时间范围必须在数据时长内且结束时间大于起始时间。');
+            if numel(r) ~= 2 || any(~isfinite(r)) || r(1) < timeStart || r(2) <= r(1) || r(2) > timeEnd + 1/app.Data.fs
+                error('LFP:InvalidAnalysisRange', '分析时间范围必须在数据实际时间范围内且结束时间大于起始时间。');
             end
             if snapshot.modules.psd || snapshot.modules.fooof || snapshot.modules.band
                 if isfield(app.Data.metadata, 'timeValidation') && ...
@@ -876,8 +876,13 @@ classdef LfpApp < handle
         end
 
         function index = timeIndexForRange(~, data, range)
-            first = max(1, floor(range(1) * data.fs) + 1); last = min(size(data.signal,1), ceil(range(2) * data.fs));
-            index = first:last; if numel(index) < 2, error('LFP:ShortAnalysisRange', '分析范围少于两个样本。'); end
+            if isfield(data, 'time') && numel(data.time) == size(data.signal, 1) && all(isfinite(data.time)) && all(diff(data.time) > 0)
+                index = find(data.time >= range(1) & data.time <= range(2));
+            else
+                first = max(1, floor(range(1) * data.fs) + 1); last = min(size(data.signal,1), ceil(range(2) * data.fs));
+                index = first:last;
+            end
+            if numel(index) < 2, error('LFP:ShortAnalysisRange', '分析范围少于两个样本。'); end
         end
 
         function sliced = sliceData(~, data, index)
@@ -944,30 +949,34 @@ classdef LfpApp < handle
             if isempty(fieldnames(app.Data)), return; end
             d=app.Data; channels=app.selectedChannels(); if isempty(channels), return; end
             r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value];
-            first=max(1,floor(r(1)*d.fs)+1); last=min(size(d.signal,1),ceil(r(2)*d.fs));
-            if isfinite(app.Controls.PlotMaxSeconds.Value), last=min(last, first+max(1,round(app.Controls.PlotMaxSeconds.Value*d.fs))-1); end
-            idx=first:last;
-            if isfield(d, 'time') && numel(d.time) >= last, t=double(d.time(idx)); else, t=(idx-1)'/d.fs; end
+            if isfield(d, 'time') && numel(d.time) == size(d.signal, 1) && all(isfinite(d.time)) && all(diff(d.time) > 0)
+                idx = find(d.time >= r(1) & d.time <= r(2));
+            else
+                first=max(1,floor(r(1)*d.fs)+1); last=min(size(d.signal,1),ceil(r(2)*d.fs)); idx=first:last;
+            end
+            if isempty(idx), return; end
+            if isfinite(app.Controls.PlotMaxSeconds.Value), idx=idx(1:min(numel(idx),max(1,round(app.Controls.PlotMaxSeconds.Value*d.fs)))); end
+            if isfield(d, 'time') && numel(d.time) == size(d.signal, 1), t=double(d.time(idx)); else, t=(idx(:)-1)/d.fs; end
             raw=d.signal(idx,channels); clean=raw;
             displayArtifactMatches = ~isempty(fieldnames(app.ArtifactResult)) && isfield(app.ArtifactResult, 'channelIndices') && isequal(app.ArtifactResult.channelIndices(:)', channels(:)');
-            if displayArtifactMatches && ~isempty(fieldnames(app.CleanData)) && isfield(app.CleanData,'cleanedSignal') && size(app.CleanData.cleanedSignal,1)>=last && size(app.CleanData.cleanedSignal,2)==numel(channels)
+            if displayArtifactMatches && ~isempty(fieldnames(app.CleanData)) && isfield(app.CleanData,'cleanedSignal') && size(app.CleanData.cleanedSignal,1)>=max(idx) && size(app.CleanData.cleanedSignal,2)==numel(channels)
                 clean=app.CleanData.cleanedSignal(idx, :);
             elseif displayArtifactMatches && app.compatibleArtifact(app.ArtifactResult, app.selectChannels(d,channels))
                 mask=app.ArtifactResult.channelMask(idx,:); clean(mask)=NaN;
             end
             rawLimits=app.finiteLimits(raw); if any(~isfinite(rawLimits)), rawLimits=[-1 1]; end
-            cla(app.Controls.RawAxes); plot(app.Controls.RawAxes,t,raw,'LineWidth',0.7); hold(app.Controls.RawAxes,'on'); if displayArtifactMatches, app.addArtifactPatches(app.Controls.RawAxes, idx, rawLimits, d.fs); end; hold(app.Controls.RawAxes,'off');
+            cla(app.Controls.RawAxes); plot(app.Controls.RawAxes,t,raw,'LineWidth',0.7); hold(app.Controls.RawAxes,'on'); if displayArtifactMatches, app.addArtifactPatches(app.Controls.RawAxes, idx, rawLimits, t); end; hold(app.Controls.RawAxes,'off');
             title(app.Controls.RawAxes, app.displayTitle("Raw signal"), 'Interpreter','none'); xlabel(app.Controls.RawAxes,'Time (s)'); ylabel(app.Controls.RawAxes,"Signal ("+string(d.units)+")"); app.Controls.RawAxes.YLim=rawLimits; grid(app.Controls.RawAxes,'on'); legend(app.Controls.RawAxes,cellstr(string(d.channelLabels(channels))),'Interpreter','none','Location','best');
-            cla(app.Controls.CleanAxes); plot(app.Controls.CleanAxes,t,clean,'LineWidth',0.7); hold(app.Controls.CleanAxes,'on'); if displayArtifactMatches, app.addArtifactPatches(app.Controls.CleanAxes,idx,rawLimits,d.fs); end; hold(app.Controls.CleanAxes,'off');
+            cla(app.Controls.CleanAxes); plot(app.Controls.CleanAxes,t,clean,'LineWidth',0.7); hold(app.Controls.CleanAxes,'on'); if displayArtifactMatches, app.addArtifactPatches(app.Controls.CleanAxes,idx,rawLimits,t); end; hold(app.Controls.CleanAxes,'off');
             title(app.Controls.CleanAxes, app.displayTitle("Clean/display (artifact samples = NaN)"), 'Interpreter','none'); xlabel(app.Controls.CleanAxes,'Time (s)'); ylabel(app.Controls.CleanAxes,"Signal ("+string(d.units)+")"); app.Controls.CleanAxes.YLim=rawLimits; grid(app.Controls.CleanAxes,'on'); legend(app.Controls.CleanAxes,cellstr(string(d.channelLabels(channels))),'Interpreter','none','Location','best');
             app.updateArtifactTable();
         end
 
-        function addArtifactPatches(app, ax, index, yLimits, fs)
+        function addArtifactPatches(app, ax, index, yLimits, timeVector)
             if isempty(fieldnames(app.ArtifactResult)) || ~isfield(app.ArtifactResult,'globalMask') || numel(app.ArtifactResult.globalMask) < max(index), return; end
             mask=app.ArtifactResult.globalMask(index); starts=find(diff([false;mask(:);false])==1); ends=find(diff([false;mask(:);false])==-1)-1;
             for k=1:numel(starts)
-                x1=(index(starts(k))-1)/fs; x2=index(ends(k))/fs;
+                x1=timeVector(starts(k)); x2=timeVector(ends(k));
                 patch(ax,[x1 x2 x2 x1], [yLimits(1) yLimits(1) yLimits(2) yLimits(2)], [1 0.2 0.2], 'FaceAlpha',0.14,'EdgeColor','none','HandleVisibility','off');
             end
         end
@@ -1089,6 +1098,16 @@ classdef LfpApp < handle
             % rate from a time column is shown in the dialog note and is
             % never silently used to overwrite the user's confirmation.
             defaultText = '1000';
+        end
+
+        function [timeStart, timeEnd] = timeBounds(~, data)
+            if isfield(data, 'time') && numel(data.time) == size(data.signal, 1) && ~isempty(data.time) && all(isfinite(data.time))
+                timeStart = double(data.time(1));
+                timeEnd = double(data.time(end));
+            else
+                timeStart = 0;
+                timeEnd = max(0, (size(data.signal, 1) - 1) / data.fs);
+            end
         end
 
         function values = parseIndexList(~, textValue)
