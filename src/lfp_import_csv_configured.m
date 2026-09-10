@@ -28,18 +28,30 @@ arguments
     options.TimeUnit (1,1) string {mustBeMember(options.TimeUnit, ["s" "ms"])} = "s"
     options.UseSceneRay (1,1) logical = true
     options.Inspection struct = struct()
+    options.ProgressCallback = []
+    options.CancellationCheck = []
 end
 
 inspection = options.Inspection;
 reuseInspection = ~isempty(fieldnames(inspection)) && isfield(inspection, 'delimiter') && ...
     string(inspection.delimiter) == options.Delimiter && isfield(inspection, 'cells');
 if ~reuseInspection
+    notify(options.ProgressCallback, 0.05, "Inspecting CSV layout...");
     inspection = lfp_inspect_csv(filename, Delimiter=options.Delimiter);
 end
+check_cancel(options.CancellationCheck);
 if inspection.isSceneRay && options.UseSceneRay
     fs = options.SamplingRateHz;
     if ~isfinite(fs) || fs <= 0, fs = 1000; end
-    data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units, Cells=inspection.cells);
+    notify(options.ProgressCallback, 0.15, "Reading SceneRay channel blocks...");
+    if get_field(inspection, 'cellsContainFullFile', false)
+        data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units, ...
+            Cells=inspection.cells, ProgressCallback=options.ProgressCallback, ...
+            CancellationCheck=options.CancellationCheck);
+    else
+        data = lfp_import_scenray_csv(filename, SamplingRateHz=fs, Units=options.Units, ...
+            ProgressCallback=options.ProgressCallback, CancellationCheck=options.CancellationCheck);
+    end
     data.metadata.sourceFilePath = filename;
     data.metadata.timeSource = "generated_from_sampling_rate";
     data.metadata.timeUnitConversion = "sample index / fs -> seconds";
@@ -51,12 +63,12 @@ if inspection.isSceneRay && options.UseSceneRay
     data.metadata.displayName = make_display_name(data);
     importInfo = inspection;
     importInfo.usedFormat = "SceneRay";
+    importInfo.readStrategy = get_field(data.metadata, 'importStrategy', "streamed_scenray");
+    notify(options.ProgressCallback, 1, "SceneRay CSV ready.");
     return;
 end
 
-cells = inspection.cells;
-nRows = size(cells, 1);
-nColumns = size(cells, 2);
+nColumns = get_field(inspection, 'columnCount', size(inspection.cells, 2));
 headerRow = options.HeaderRow;
 if ~isfinite(headerRow), headerRow = inspection.headerRowSuggestion; end
 dataStartRow = options.DataStartRow;
@@ -66,8 +78,8 @@ if ~isfinite(timeColumn), timeColumn = inspection.timeColumnSuggestion; end
 headerRow = round(headerRow);
 dataStartRow = round(dataStartRow);
 timeColumn = round(timeColumn);
-if dataStartRow < 1 || dataStartRow > nRows
-    error('LFP:InvalidDataStartRow', 'DataStartRow must identify a row between 1 and %d.', nRows);
+if dataStartRow < 1
+    error('LFP:InvalidDataStartRow', 'DataStartRow must identify a positive source row.');
 end
 if timeColumn < 0 || timeColumn > nColumns
     error('LFP:InvalidTimeColumn', 'TimeColumn must be 0 (none) or a valid column index.');
@@ -81,7 +93,16 @@ if isempty(signalColumns)
     error('LFP:NoSignalColumns', 'No numeric signal columns remain after excluding the time column.');
 end
 
-rowIndices = dataStartRow:nRows;
+notify(options.ProgressCallback, 0.20, "Reading numeric CSV columns...");
+check_cancel(options.CancellationCheck);
+[numericRows, readStrategy] = read_numeric_rows(filename, options.Delimiter, dataStartRow, nColumns);
+if isempty(numericRows)
+    error('LFP:NoNumericSamples', 'No numeric samples were found at or after DataStartRow %d.', dataStartRow);
+end
+if size(numericRows, 2) < nColumns
+    numericRows(:, end+1:nColumns) = NaN;
+end
+check_cancel(options.CancellationCheck);
 if options.DataDirection == "channels_by_samples"
     % In this explicit orientation, each source row is one channel and the
     % selected columns are samples.  The canonical model remains
@@ -91,23 +112,12 @@ if options.DataDirection == "channels_by_samples"
         error('LFP:TimeColumnUnsupportedForOrientation', ...
             'For channels_by_samples input, set TimeColumn to 0 and provide SamplingRateHz.');
     end
-    signal = NaN(numel(signalColumns), numel(rowIndices));
-    for channel = 1:numel(rowIndices)
-        for sample = 1:numel(signalColumns)
-            signal(sample, channel) = to_number(cells{rowIndices(channel), signalColumns(sample)});
-        end
-    end
+    signal = numericRows(:, signalColumns).';
 else
-    nSamples = numel(rowIndices);
-    signal = NaN(nSamples, numel(signalColumns));
-    for channel = 1:numel(signalColumns)
-        column = signalColumns(channel);
-        for row = 1:nSamples
-            signal(row, channel) = to_number(cells{rowIndices(row), column});
-        end
-    end
+    signal = numericRows(:, signalColumns);
 end
 signal = signal .* options.AmplitudeScale;
+notify(options.ProgressCallback, 0.65, "Building canonical numeric arrays...");
 
 nSamples = size(signal, 1);
 timeValues = NaN(nSamples, 1);
@@ -116,9 +126,7 @@ timeValidation = struct('hasTimeColumn', timeColumn > 0, 'valid', true, ...
     'isMonotonic', true, 'hasDuplicates', false, 'isIrregular', false, ...
     'medianStep', NaN, 'coefficientOfVariation', NaN, 'message', "");
 if timeColumn > 0
-    for row = 1:nSamples
-        timeValues(row) = to_number(cells{rowIndices(row), timeColumn});
-    end
+    timeValues = numericRows(:, timeColumn);
     if options.TimeUnit == "ms", timeValues = timeValues / 1000; end
     [estimatedFs, timeValidation] = validate_time_values(timeValues);
     fs = options.SamplingRateHz;
@@ -143,17 +151,19 @@ if options.DataDirection == "channels_by_samples"
     labelColumn = setdiff(1:nColumns, signalColumns);
     if ~isempty(labelColumn)
         labelColumn = labelColumn(1);
-        for channel = 1:numel(rowIndices)
-            candidate = string_or_empty(cells{rowIndices(channel), labelColumn});
+        labelRows = get_rows_for_labels(filename, options.Delimiter, dataStartRow, size(numericRows, 1));
+        for channel = 1:size(numericRows, 1)
+            candidate = string_or_empty(labelRows{channel, labelColumn});
             if strlength(strtrim(candidate)) > 0 && ~isfinite(str2double(candidate))
                 channelLabels(channel) = strtrim(candidate);
             end
         end
     end
-elseif headerRow >= 1 && headerRow <= nRows
+elseif headerRow >= 1
     channelLabels = "channel_" + string(1:numel(signalColumns));
+    headerCells = get_header_row(inspection, filename, options.Delimiter, headerRow, nColumns);
     for channel = 1:numel(signalColumns)
-        candidate = string_or_empty(cells{headerRow, signalColumns(channel)});
+        candidate = string_or_empty(headerCells{signalColumns(channel)});
         if strlength(strtrim(candidate)) > 0
             channelLabels(channel) = strtrim(candidate);
         end
@@ -176,8 +186,9 @@ metadata.timeUnit = options.TimeUnit;
 metadata.timeSource = ternary_text(timeColumn > 0, "csv", "generated_from_sampling_rate");
 metadata.timeUnitConversion = ternary_text(timeColumn > 0 && options.TimeUnit == "ms", ...
     "milliseconds / 1000 -> seconds", "values already in seconds");
-if headerRow >= 1 && headerRow <= nRows
-    metadata.originalColumnNames = string(cells(headerRow, :));
+if headerRow >= 1
+    headerCells = get_header_row(inspection, filename, options.Delimiter, headerRow, nColumns);
+    metadata.originalColumnNames = string(headerCells);
 else
     metadata.originalColumnNames = "column_" + string(1:nColumns);
 end
@@ -185,6 +196,9 @@ metadata.timeValidation = timeValidation;
 metadata.estimatedSamplingRateHz = estimatedFs;
 metadata.amplitudeScale = options.AmplitudeScale;
 metadata.missingValueCount = nnz(~isfinite(signal));
+metadata.fileSizeBytes = get_field(inspection, 'fileSizeBytes', file_bytes(filename));
+metadata.importStrategy = readStrategy;
+metadata.estimatedMemoryBytes = 8 * (numel(signal) + numel(timeValues));
 metadata.displayName = string(get_filename(filename));
 metadata.importSettings = struct('format', "generic", 'delimiter', options.Delimiter, ...
     'headerRow', headerRow, 'dataStartRow', dataStartRow, 'timeColumn', timeColumn, ...
@@ -213,6 +227,8 @@ importInfo.actualDataStartRow = dataStartRow;
 importInfo.actualTimeColumn = timeColumn;
 importInfo.actualSignalColumns = signalColumns;
 importInfo.actualSamplingRateHz = fs;
+importInfo.readStrategy = readStrategy;
+notify(options.ProgressCallback, 1, "CSV ready.");
 end
 
 function value = ternary_text(condition, first, second)
@@ -287,4 +303,71 @@ end
 function name = get_filename(filename)
 [~, stem, extension] = fileparts(filename);
 name = stem + extension;
+end
+
+function [numericRows, strategy] = read_numeric_rows(filename, delimiter, dataStartRow, expectedColumns)
+try
+    numericRows = readmatrix(filename, 'FileType', 'text', 'Delimiter', char(delimiter), ...
+        'NumHeaderLines', max(0, dataStartRow - 1), 'OutputType', 'double');
+    strategy = "readmatrix_numeric";
+catch
+    raw = readcell(filename, 'FileType', 'text', 'Delimiter', char(delimiter), ...
+        'NumHeaderLines', max(0, dataStartRow - 1));
+    numericRows = NaN(size(raw));
+    for column = 1:size(raw, 2)
+        for row = 1:size(raw, 1)
+            numericRows(row, column) = to_number(raw{row, column});
+        end
+    end
+    strategy = "readcell_fallback";
+end
+if isvector(numericRows) && expectedColumns > 1 && mod(numel(numericRows), expectedColumns) == 0
+    numericRows = reshape(numericRows, [], expectedColumns);
+end
+end
+
+function header = get_header_row(inspection, filename, delimiter, headerRow, expectedColumns)
+if isfield(inspection, 'cells') && headerRow <= size(inspection.cells, 1)
+    header = inspection.cells(headerRow, :);
+else
+    [rows, ~] = lfp_read_csv_preview(filename, Delimiter=delimiter, MaxRows=headerRow);
+    if headerRow > size(rows, 1)
+        error('LFP:InvalidHeaderRow', 'HeaderRow %d is beyond the end of the CSV.', headerRow);
+    end
+    header = rows(headerRow, :);
+end
+if numel(header) < expectedColumns, header(end+1:expectedColumns) = {''}; end
+header = header(1:expectedColumns);
+end
+
+function rows = get_rows_for_labels(filename, delimiter, dataStartRow, rowCount)
+lastRow = dataStartRow + rowCount - 1;
+[preview, ~] = lfp_read_csv_preview(filename, Delimiter=delimiter, MaxRows=lastRow);
+if size(preview, 1) < lastRow
+    error('LFP:InvalidDataStartRow', 'CSV ended before all channel rows could be read.');
+end
+rows = preview(dataStartRow:lastRow, :);
+end
+
+function notify(callback, fraction, message)
+if isempty(callback), return; end
+try
+    callback(fraction, string(message));
+catch exception
+    if strcmp(exception.identifier, 'LFP:UserCancelled'), rethrow(exception); end
+end
+end
+
+function check_cancel(callback)
+if isempty(callback), return; end
+callback();
+end
+
+function bytes = file_bytes(filename)
+info = dir(filename);
+if isempty(info), bytes = NaN; else, bytes = double(info.bytes); end
+end
+
+function value = get_field(s, name, defaultValue)
+if isstruct(s) && isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
 end

@@ -13,6 +13,7 @@ arguments
     filename (1,1) string
     options.Delimiter (1,1) string = ","
     options.PreviewRows (1,1) double {mustBeInteger, mustBePositive} = 20
+    options.ScanRows (1,1) double {mustBeInteger, mustBePositive} = 200
 end
 
 if ~isfile(filename)
@@ -20,7 +21,10 @@ if ~isfile(filename)
 end
 delimiter = char(options.Delimiter);
 try
-    cells = readcell(filename, 'FileType', 'text', 'Delimiter', delimiter);
+    started = tic;
+    [cells, previewInfo] = lfp_read_csv_preview(filename, Delimiter=delimiter, ...
+        MaxRows=max(options.PreviewRows, options.ScanRows));
+    inspectionSeconds = toc(started);
 catch exception
     error('LFP:CsvReadFailed', 'Could not read CSV %s: %s', filename, exception.message);
 end
@@ -46,14 +50,23 @@ previewRows = min(nRows, options.PreviewRows);
 inspection = struct();
 inspection.filename = filename;
 inspection.delimiter = string(options.Delimiter);
+% CELLS now contains only the bounded scan used for layout suggestions. It
+% must never be treated as the complete imported dataset unless EOF was
+% reached within ScanRows.
 inspection.cells = cells;
+inspection.cellsContainFullFile = previewInfo.reachedEof;
 % Keep the raw cells unchanged for import, but expose a uitable-safe copy for
 % GUI preview.  MATLAB uitable accepts only numeric, logical, or char values
 % inside a cell array; readcell may return string, missing, datetime, or other
 % scalar types depending on the CSV content.
 inspection.preview = preview_for_uitable(cells(1:previewRows, :));
-inspection.rowCount = nRows;
+inspection.rowCount = previewInfo.exactRowCount;
+inspection.estimatedRowCount = previewInfo.estimatedRowCount;
 inspection.columnCount = nColumns;
+inspection.fileSizeBytes = previewInfo.fileSizeBytes;
+inspection.previewRowCount = previewInfo.previewRowCount;
+inspection.readStrategy = previewInfo.readStrategy;
+inspection.inspectionSeconds = inspectionSeconds;
 inspection.isSceneRay = isSceneRay;
 inspection.formatSuggestion = ternary(isSceneRay, "SceneRay", "generic");
 inspection.headerRowSuggestion = headerRow;

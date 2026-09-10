@@ -27,9 +27,9 @@ verifyEqual(testCase, data.signal, [-1.5; 2.5; 0]);
 verifyEqual(testCase, data.time, [0; 0.001; 0.002], 'AbsTol', eps);
 verifyEqual(testCase, data.metadata.tagCode, ["A"; "B"; ""]);
 verifyEqual(testCase, data.processingHistory.operation, "import");
+verifyEqual(testCase, data.metadata.importStrategy, "streamed_scenray");
 
-% The GUI passes its inspection result back to the importer so the CSV is
-% not read a second time after the preview step.
+% Small previews that reached EOF can still be reused without a second read.
 inspection = lfp_inspect_csv(filename);
 configured = lfp_import_csv_configured(filename, Inspection=inspection);
 verifyEqual(testCase, configured.signal, data.signal);

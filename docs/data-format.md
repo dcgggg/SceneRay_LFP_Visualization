@@ -22,13 +22,15 @@ data.processingHistory  % ordered struct array of operations and parameters
 data.cleanedSignal      % optional NaN-marked analysis/display copy
 ```
 
-For generic CSV files, `lfp_inspect_csv` returns the preview and automatic suggestions. `lfp_import_csv_configured` accepts the confirmed settings. With `DataDirection="samples_by_channels"`, rows are samples and selected columns are channels. With `DataDirection="channels_by_samples"`, selected columns are samples and each source row is a channel; the output is normalized back to samples × channels. A time column is not supported for the latter orientation because its meaning is ambiguous; provide an explicit sampling rate. Missing signal cells remain NaN and are counted in `metadata.missingValueCount`.
+For generic CSV files, `lfp_inspect_csv` reads only a bounded prefix for preview and automatic suggestions; it does not materialize the entire file as a heterogeneous cell array. `lfp_import_csv_configured` accepts the confirmed settings and uses a numeric `readmatrix` path for rectangular files, with an explicitly recorded `readcell_fallback` only when the numeric reader cannot handle the source. With `DataDirection="samples_by_channels"`, rows are samples and selected columns are channels. With `DataDirection="channels_by_samples"`, selected columns are samples and each source row is a channel; the output is normalized back to samples × channels. A time column is not supported for the latter orientation because its meaning is ambiguous; provide an explicit sampling rate. Missing signal cells remain NaN and are counted in `metadata.missingValueCount`.
 
 `metadata.timeValidation` records monotonicity, duplicates, regularity, median time step and coefficient of variation. The GUI blocks PSD/model workflows when this validation is invalid or irregular rather than silently resampling. If no time column is supplied, a user-confirmed `SamplingRateHz` is required and `data.time` is generated from sample indices.
 
 `detectAndHandleArtifacts` returns `artifactResult.sampleMask`, `channelMask`, `globalMask`, `events`, `badChannels`, `method`, `parameters`, `summary`, `retainedDuration`, `rejectedDuration`, `rejectedPercentage`, `warnings`, and `processingHistory`. `events` contains artifact type, sample/time bounds, channel, score, threshold and method. Original `data.signal` remains unchanged; mask-based exclusion is distinct from reconstruction.
 
 For multi-block files, `data.metadata.channelRows`, `blockStarts`, `blockEnds`, and `headerRows` preserve the row-level parsing decisions for auditability. `data.metadata.blocks` stores metadata for each channel independently.
+
+Both adapters record `metadata.fileSizeBytes`, `metadata.importStrategy`, and `metadata.estimatedMemoryBytes`. SceneRay files are parsed sequentially so large files do not require a second full heterogeneous cell-array copy solely for preview/import.
 
 ## Validation policy
 

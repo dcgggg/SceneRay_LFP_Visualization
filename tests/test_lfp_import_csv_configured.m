@@ -58,6 +58,35 @@ verifyEqual(testCase, data.signal(:, 1), (1:12)');
 verifyEqual(testCase, data.signal(:, 2), (21:32)');
 end
 
+function testLargePreviewIsBoundedAndFastPathBuildsNumericArrays(testCase)
+ensure_src_on_path(testCase);
+filename = [tempname '.csv'];
+cleanup = onCleanup(@() delete_if_exists(filename)); %#ok<NASGU>
+nSamples = 5000;
+writematrix([(0:nSamples-1)'/1000, sin((0:nSamples-1)'/10), cos((0:nSamples-1)'/10)], filename);
+inspection = lfp_inspect_csv(filename, PreviewRows=20, ScanRows=120);
+verifyLessThanOrEqual(testCase, size(inspection.cells, 1), 120);
+verifyFalse(testCase, inspection.cellsContainFullFile);
+verifyGreaterThan(testCase, inspection.fileSizeBytes, 0);
+verifyEqual(testCase, inspection.readStrategy, "streamed_preview");
+[data, info] = lfp_import_csv_configured(filename, Inspection=inspection, ...
+    TimeColumn=1, SignalColumns=[2 3], SamplingRateHz=1000);
+verifyClass(testCase, data.time, 'double');
+verifyClass(testCase, data.signal, 'double');
+verifySize(testCase, data.signal, [nSamples 2]);
+verifyEqual(testCase, info.readStrategy, "readmatrix_numeric");
+verifyEqual(testCase, data.metadata.importStrategy, "readmatrix_numeric");
+verifyEqual(testCase, data.metadata.estimatedMemoryBytes, 8*(numel(data.signal)+numel(data.time)));
+end
+
+function testDelimitedPreviewPreservesQuotedComma(testCase)
+ensure_src_on_path(testCase);
+values = lfp_parse_delimited_line('1,"label,with,commas",3', ',');
+verifyEqual(testCase, values{1}, 1);
+verifyEqual(testCase, values{2}, 'label,with,commas');
+verifyEqual(testCase, values{3}, 3);
+end
+
 function ensure_src_on_path(testCase)
 projectRoot = fileparts(fileparts(mfilename('fullpath')));
 srcRoot = fullfile(projectRoot, 'src');
