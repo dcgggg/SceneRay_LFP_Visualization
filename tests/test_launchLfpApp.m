@@ -12,6 +12,10 @@ verifyTrue(testCase, isgraphics(app.Figure));
 verifyTrue(testCase, isgraphics(app.Controls.RawAxes));
 verifyTrue(testCase, isgraphics(app.Controls.PsdAxes));
 verifyEqual(testCase, string(app.Controls.ArtifactMethod.Value), "native");
+verifyFalse(testCase, isfield(app.Controls, 'SummaryPsdAxes'));
+verifyEqual(testCase, string(app.Controls.FooofMode.Value), "fixed");
+verifyEqual(testCase, string(app.Controls.PsdMethod.Value), "welch");
+verifyTrue(testCase, isgraphics(app.Controls.PsdTimeFrequencyAxes));
 end
 
 function testGuiRunsSyntheticPipeline(testCase)
