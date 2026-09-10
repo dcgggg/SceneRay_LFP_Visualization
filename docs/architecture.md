@@ -11,6 +11,7 @@
 7. **Visualization** — figures consume result structures and do not run hidden analysis.
 8. **Export** — tables, MAT files, figures, and a processing log with parameters and software information.
 9. **GUI** — the MATLAB-native `LfpApp`/`launchLfpApp` layer. It owns import confirmation, parameter controls, run snapshots, cache/expiry status, result tabs and save actions, while calling the same public analysis functions as scripts.
+10. **Dataset manager** — the GUI keeps each CSV as an independent `Datasets(k)` record with canonical arrays and an `analysisResults` struct. Checkbox selection drives sequential per-dataset runs; files are never concatenated for PSD or parameterization.
 
 ## Dependency policy
 
@@ -29,3 +30,5 @@ CSV -> inspection/import confirmation -> validated data model -> derived preproc
 The GUI takes a run snapshot containing the selected channels, analysis range, module switches and a copied configuration. A successful run replaces the previous result atomically; a failed or cancelled run leaves the last successful result and raw data intact. Plot-only edits do not trigger analysis, while data/artifact/PSD/model/band edits invalidate their downstream caches.
 
 The raw signal remains in the data model and is never overwritten by a derived signal.
+
+The GUI `AppState` records selected dataset indices, selected channels, the active analysis stage, current result handles and plot settings. Dataset/channel selectors in the Raw, PSD, time-frequency and specparam tabs update the active record and redraw only the corresponding result views where possible.

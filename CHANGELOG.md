@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Incremental local development after v0.6.1; no remote release or push performed in this task.
+- Upgraded the native GUI to a multi-dataset session manager: multiple CSV files remain independent, each dataset keeps raw arrays and analysis results, and selected datasets can be run sequentially.
+- Added unified dataset table controls, per-result dataset/channel selectors, PSD single/multi/subplot views, independent time-frequency tab, grouped multi-dataset band bars, Gaussian component display, and per-tab PNG/SVG/FIG/MAT export actions.
+- Enlarged/reflowed GUI controls, added shared UI sizing parameters, shortened long labels, and preserved real CSV time origins in range controls.
 - Added configurable DPSS Multitaper PSD and sliding STFT/DPSS time-frequency outputs.
 - Added native fixed/knee specparam parameterization and removed fitting-time interpolation.
 - Updated GUI labels to specparam（原FOOOF）, added method/multitaper/time-frequency controls, replaced band heatmap with dot facets, and removed the legacy 摘要 tab.

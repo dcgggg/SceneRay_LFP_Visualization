@@ -4,7 +4,7 @@ function cfg = lfpDefaultConfig()
 %   calling the analysis functions. No function reads user input dialogs.
 
 cfg = struct();
-cfg.version = "0.7.0";
+cfg.version = "0.8.0";
 cfg.artifact = struct();
 cfg.artifact.method = "native";
 cfg.artifact.nativeFallback = true;

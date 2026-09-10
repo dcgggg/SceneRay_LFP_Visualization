@@ -48,9 +48,14 @@ if isfield(modelResult, 'peakParams') && ~isempty(modelResult.peakParams)
     end
 end
 hold(handles.axes(1), 'off'); xlabel(handles.axes(1), 'Frequency (Hz)'); ylabel(handles.axes(1), 'log10(power)');
-title(handles.axes(1), sprintf('Fixed model [%s]: offset %.3f, exponent %.3f, R^2 %.3f, error %.3f', ...
-    get_field(modelResult, 'fitStatus', "unknown"), modelResult.aperiodicParams.offset, ...
-    modelResult.aperiodicParams.exponent, modelResult.rSquared, modelResult.fitError));
+mode = get_field(modelResult.aperiodicParams, 'mode', "fixed");
+kneeText = '';
+if string(mode) == "knee" && isfield(modelResult.aperiodicParams, 'knee') && isfinite(modelResult.aperiodicParams.knee)
+    kneeText = sprintf(', knee %.4g', modelResult.aperiodicParams.knee);
+end
+title(handles.axes(1), sprintf('specparam %s [%s]: offset %.3f, exponent %.3f%s, R^2 %.3f, error %.3f', ...
+    mode, get_field(modelResult, 'fitStatus', "unknown"), modelResult.aperiodicParams.offset, ...
+    modelResult.aperiodicParams.exponent, kneeText, modelResult.rSquared, modelResult.fitError));
 legend(handles.axes(1), 'Location', 'best'); grid(handles.axes(1), 'on');
 
 handles.axes(2) = nexttile(layout);
@@ -61,6 +66,15 @@ end
 if any(isfinite(fullModel)) && any(isfinite(aperiodic))
     gaussianLog = log10(max(fullModel, realmin)) - log10(max(aperiodic, realmin));
     plotFrequency(handles.axes(2), freq, gaussianLog, plotCfg, 'g', 'Gaussian periodic sum');
+    if isfield(modelResult, 'gaussianParams') && ~isempty(modelResult.gaussianParams)
+        peakColors = lines(numel(modelResult.gaussianParams));
+        for peakIndex = 1:numel(modelResult.gaussianParams)
+            peak = modelResult.gaussianParams(peakIndex);
+            component = peak.amplitudeLog10 * exp(-0.5 * ((freq - peak.centerFrequencyHz) / peak.sigmaHz).^2);
+            plotFrequency(handles.axes(2), freq, component, plotCfg, '-.', peakColors(peakIndex,:), ...
+                sprintf('Gaussian %d (CF %.2f Hz)', peakIndex, peak.centerFrequencyHz));
+        end
+    end
 end
 hold(handles.axes(2), 'off');
 xlabel(handles.axes(2), 'Frequency (Hz)'); ylabel(handles.axes(2), 'log10 residual');
@@ -68,10 +82,21 @@ title(handles.axes(2), sprintf('Periodic decomposition (%d peaks)', modelResult.
 lfp_apply_plot_config(figureHandle, plotCfg, layout);
 end
 
-function plotFrequency(ax, frequency, values, cfg, style, displayName)
+function plotFrequency(ax, frequency, values, cfg, style, varargin)
+if numel(varargin) == 1
+    color = [];
+    displayName = varargin{1};
+elseif numel(varargin) == 2
+    color = varargin{1};
+    displayName = varargin{2};
+else
+    error('LFP:InvalidPlotArguments', 'plotFrequency expects a display name and optional color.');
+end
+plotArgs = {'DisplayName', displayName, 'LineWidth', 1.0};
+if ~isempty(color), plotArgs = [plotArgs {'Color', color}]; end %#ok<AGROW>
 scale = get_field(cfg, 'frequencyScale', "linear");
-if string(scale) == "log", semilogx(ax, frequency, values, style, 'DisplayName', displayName, 'LineWidth', 1.0);
-else, plot(ax, frequency, values, style, 'DisplayName', displayName, 'LineWidth', 1.0); end
+if string(scale) == "log", semilogx(ax, frequency, values, style, plotArgs{:});
+else, plot(ax, frequency, values, style, plotArgs{:}); end
 end
 
 function value = get_field(s, name, defaultValue)

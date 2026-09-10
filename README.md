@@ -2,7 +2,7 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
-当前本地开发版本：**v0.7.0**。本阶段在 v0.6.1 基础上增加 DPSS Multitaper、specparam（原 FOOOF）fixed/knee 模式、滑窗时频图和频段点图。
+当前本地开发版本：**v0.8.0**。本阶段在 v0.7.0 基础上增加多 CSV 数据集管理、独立时频页、PSD 显示模式、Gaussian 峰分解和分组频段比较。
 
 ## 目标
 
@@ -37,7 +37,7 @@
 
 ## 当前状态
 
-当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam（原 FOOOF）参数化、Gaussian 周期峰、频带功率点图、伪影/PSD/时频/模型图、结果导出以及 MATLAB 原生 GUI。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、方向、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
+当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam（原 FOOOF）参数化、Gaussian 周期峰、频带功率点图、伪影/PSD/时频/模型图、结果导出以及 MATLAB 原生 GUI。GUI 现在可以一次选择多个 CSV；每个文件作为独立 dataset 保存时间、信号、通道、采样率、元数据和 `analysisResults`，运行时逐个完成分析，禁止跨文件拼接计算 PSD。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、方向、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
 
 `fooof_mat` 是 MATLAB 对 Python FOOOF 的封装，需要 Python 运行环境，因此不纳入本项目的核心依赖。FieldTrip/原生 MATLAB 路径将保持纯 MATLAB 运行。
 
@@ -76,11 +76,14 @@ GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分�
 - **PSD**：有效窗口数量、频率分辨率、去伪迹前后 PSD 对照；
 - **specparam（原 FOOOF）**：原始谱、完整模型、非周期背景、周期峰、offset/exponent/knee/R²/误差和峰参数表；
 - **频段功率**：可编辑频段表、按频段或按通道分面的通道点图，不伪造误差条；
-- **PSD + 时频**：上方多通道 PSD，下方当前通道滑窗 STFT 或滑窗 DPSS 时频功率图；已移除旧的“摘要”页。
+- **PSD**：支持单通道、多通道和 subplot 显示，可切换显示伪迹前 PSD；
+- **时频分析**：独立页面显示当前数据集/通道的滑窗 STFT 或滑窗 DPSS 功率图，色限支持 5%–95% 稳健自动范围或手动范围；
+- **specparam（原 FOOOF）**：支持数据集/通道选择，并显示各 Gaussian 峰分量及其总和；
+- **频段功率**：单数据集按频段/通道分面，多数据集使用 grouped bar 比较；已移除旧的“摘要”页。
 
 “分析时间范围”和“波形显示范围”彼此独立。修改颜色、坐标或显示范围后使用“重新绘图”；修改 PSD、FOOOF、频段或伪迹参数会标记结果过期，必须重新运行。GUI 中的“伪迹重建”暂时禁用，默认只保存原始数据、mask、事件和 NaN 显示副本。没有有效时间列或时间间隔不规则时，GUI 会阻止需要均匀采样的 PSD 分析，并提示修正导入设置。
 
-GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出标准 `signal_data.csv`、`psd.csv`、`time_frequency.mat`、band-power/processing-history CSV 和 PNG 总览图。自动保存选项使用带时间戳的子目录，不覆盖已有结果；完整 MAT 会同时保留导入映射、单位、PSD/specparam/时频参数与 processingHistory。
+GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出标准 `signal_data.csv`、`psd.csv`、`time_frequency.mat`、band-power/processing-history CSV 和 PNG 总览图。结果页提供保存图像（PNG/SVG/FIG）和保存当前视图数据（MAT）按钮，保存内容包含数据集、通道、参数快照和时间戳。自动保存选项使用带时间戳的子目录，不覆盖已有结果；完整 MAT 会同时保留导入映射、单位、PSD/specparam/时频参数与 processingHistory。
 
 v0.6.1 还包含以下 GUI 稳定性修复：CSV 预览、信息栏、伪迹事件表和频段结果表会将字符串/分类值转换为 `uitable` 可显示的字符值，但不会修改原始导入数据或分析结果表；确认导入时会复用已经完成预览的 CSV 内容，SceneRay 数据行解析也采用预分配方式以减少大文件导入耗时。
 
