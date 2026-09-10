@@ -28,8 +28,10 @@ app.onRun([], []);
 verifyTrue(testCase, app.Cache.psdValid);
 verifyEqual(testCase, string(app.Datasets(1).status), "已完成");
 verifyEqual(testCase, string(app.Datasets(2).status), "已完成");
-verifySize(testCase, app.Datasets(1).analysisResults.psdResult.psd, [159 2]);
-verifySize(testCase, app.Datasets(2).analysisResults.psdResult.psd, [159 2]);
+verifySize(testCase, app.Datasets(1).analysisResults.psdResult.psd, ...
+    [numel(app.Datasets(1).analysisResults.psdResult.frequencyHz) 2]);
+verifySize(testCase, app.Datasets(2).analysisResults.psdResult.psd, ...
+    [numel(app.Datasets(2).analysisResults.psdResult.frequencyHz) 2]);
 end
 
 function data = fixture_data(t, labels, frequency, fileName)

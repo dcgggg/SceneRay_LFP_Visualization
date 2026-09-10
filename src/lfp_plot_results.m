@@ -90,9 +90,18 @@ end
 nexttile;
 if isfield(data, 'timeFrequency')
     channel = channels(1);
-    imagesc(data.timeFrequency.timeSeconds, data.timeFrequency.frequencyHz, ...
-        10*log10(max(data.timeFrequency.power(:, :, channel), realmin)));
-    axis xy; xlabel('Time (s)'); ylabel('Frequency (Hz)'); colorbar;
+    tf = data.timeFrequency;
+    tfPower = double(tf.power(:, :, channel));
+    tfScale = lower(string(get_field_local(tf, 'powerScale', 'linear')));
+    if tfScale == "log10"
+        tfDisplay = NaN(size(tfPower)); valid = tfPower > 0 & isfinite(tfPower); tfDisplay(valid) = log10(tfPower(valid)); tfLabel = 'log10(power)';
+    elseif tfScale == "db"
+        tfDisplay = NaN(size(tfPower)); valid = tfPower > 0 & isfinite(tfPower); tfDisplay(valid) = 10*log10(tfPower(valid)); tfLabel = 'Power (dB)';
+    else
+        tfDisplay = tfPower; tfLabel = 'Power (units^2/Hz)';
+    end
+    imagesc(tf.timeSeconds, tf.frequencyHz, tfDisplay);
+    axis xy; xlabel('Time (s)'); ylabel('Frequency (Hz)'); cb = colorbar; cb.Label.String = tfLabel;
     title('Time-frequency power (channel ' + string(channel) + ')');
 else
     text(0.1, 0.5, 'Run lfp_compute_time_frequency to display the STFT.'); axis off;
@@ -122,6 +131,7 @@ if isfield(data, 'metadata') && isfield(data.metadata, 'displayName') && ...
     name = string(data.metadata.displayName);
     return;
 end
+
 source = ""; ipg = "";
 if isfield(data, 'metadata')
     if isfield(data.metadata, 'sourceFileName'), source = string(data.metadata.sourceFileName); end
@@ -133,5 +143,13 @@ elseif strlength(source) > 0
     name = source;
 elseif strlength(ipg) > 0
     name = "IPG SN " + ipg;
+end
+end
+
+function value = get_field_local(s, name, defaultValue)
+if isstruct(s) && isfield(s, name) && ~isempty(s.(name))
+    value = s.(name);
+else
+    value = defaultValue;
 end
 end

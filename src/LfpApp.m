@@ -36,6 +36,8 @@ classdef LfpApp < handle
             'modelValid', false, 'bandValid', false, 'plotValid', false)
         IsRunning = false
         CancelRequested = false
+        ClosingRequested = false
+        ImportDialog
         TaskManager
         PlotDirty = struct('raw', true, 'psd', true, 'timeFrequency', true, ...
             'specparam', true, 'band', true)
@@ -57,24 +59,38 @@ classdef LfpApp < handle
         end
 
         function delete(app)
+            app.ClosingRequested = true;
+            if ~isempty(app.TaskManager)
+                try, app.TaskManager.requestCancel(); catch, end
+            end
             if ~isempty(app.Figure) && isgraphics(app.Figure)
                 delete(app.Figure);
             end
         end
 
         function closeApp(app, ~, ~)
-            if app.IsRunning
-                app.CancelRequested = true;
-                app.setStatus("正在停止当前运行；请等待当前阶段结束。", "warning");
+            if app.ClosingRequested
                 return;
             end
-            if ~isempty(app.Figure) && isgraphics(app.Figure)
-                delete(app.Figure);
+            app.ClosingRequested = true;
+            app.CancelRequested = true;
+            if ~isempty(app.TaskManager)
+                try, app.TaskManager.requestCancel(); catch, end
             end
+            % Close modal import/progress dialogs created by this app.  The
+            % import callback checks ClosingRequested before touching UI.
+            if ~isempty(app.ImportDialog) && isgraphics(app.ImportDialog)
+                try, app.ImportDialog.Visible = 'off'; delete(app.ImportDialog); catch, end
+            end
+            if app.IsRunning
+                app.setStatus("正在停止当前任务；将在当前计算块结束后退出。", "warning");
+                return;
+            end
+            app.finishClose();
         end
 
         function onImport(app, ~, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             [file, folder] = uigetfile({'*.csv', 'CSV 文件 (*.csv)'}, '选择一个或多个 LFP CSV 文件', 'MultiSelect', 'on');
             if isequal(file, 0), return; end
             if iscell(file)
@@ -90,7 +106,7 @@ classdef LfpApp < handle
         end
 
         function onLoadConfig(app, ~, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             [file, folder] = uigetfile({'*.mat', 'MAT 配置文件 (*.mat)'}, '加载分析配置');
             if isequal(file, 0), return; end
             try
@@ -113,7 +129,7 @@ classdef LfpApp < handle
         end
 
         function onSaveConfig(app, ~, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             try
                 app.Config = app.readConfigFromUi();
                 [file, folder] = uiputfile({'*.mat', 'MAT 配置文件 (*.mat)'}, '保存分析配置', 'lfp_config.mat');
@@ -127,7 +143,7 @@ classdef LfpApp < handle
         end
 
         function onSaveResults(app, ~, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             if isempty(fieldnames(app.AnalysisData))
                 app.showWarning("尚无可保存结果", "请先运行至少一个分析模块。");
                 return;
@@ -162,7 +178,7 @@ classdef LfpApp < handle
         end
 
         function onRun(app, ~, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             datasetIndices = app.selectedDatasetIndices();
             if isempty(datasetIndices)
                 app.showWarning("尚未导入数据", "请先导入并选择至少一个 CSV 文件。");
@@ -400,7 +416,7 @@ classdef LfpApp < handle
         end
 
         function onSaveView(app, kind, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             kind = string(kind);
             [file, folder, filterIndex] = uiputfile({'*.png','PNG 图片'; '*.svg','SVG 矢量图'; '*.fig','MATLAB FIG 文件'}, ...
                 '保存当前图形', char(kind + ".png"));
@@ -427,20 +443,25 @@ classdef LfpApp < handle
         end
 
         function onSaveViewData(app, kind, ~)
-            if app.IsRunning, return; end
+            if app.IsRunning || app.ClosingRequested, return; end
             [file, folder] = uiputfile('*.mat', '保存当前视图数据', char(string(kind) + "_view.mat"));
             if isequal(file,0), return; end
-            payload = struct('dataset', app.currentDatasetName(), 'channel', string(app.Data.channelLabels(:)), ...
-                'analysisParameters', get_field_local(app.LastRunSnapshot, 'cfg', app.Config), ...
-                'savedAt', string(datestr(now, 31)), 'kind', string(kind));
-            switch string(kind)
-                case "raw", payload.time = app.Data.time; payload.signal = app.Data.signal;
-                case "psd", payload.beforePsd = app.BeforePsd; payload.psd = app.PsdResult;
-                case "timeFrequency", payload.timeFrequency = get_field_local(app.PsdResult, 'timeFrequency', struct());
-                case "specparam", payload.modelResult = app.ModelResult;
-                case "band", payload.bandResult = app.BandResult;
+            try
+                payload = struct('dataset', app.currentDatasetName(), 'channel', string(app.Data.channelLabels(:)), ...
+                    'analysisParameters', get_field_local(app.LastRunSnapshot, 'cfg', app.Config), ...
+                    'savedAt', string(datestr(now, 31)), 'kind', string(kind));
+                switch string(kind)
+                    case "raw", payload.time = app.Data.time; payload.signal = app.Data.signal;
+                    case "psd", payload.beforePsd = app.BeforePsd; payload.psd = app.PsdResult;
+                    case "timeFrequency", payload.timeFrequency = get_field_local(app.PsdResult, 'timeFrequency', struct());
+                    case "specparam", payload.modelResult = app.ModelResult;
+                    case "band", payload.bandResult = app.BandResult;
+                    otherwise, error('LFP:UnknownPlot', '未知视图：%s', kind);
+                end
+                target = fullfile(folder, file); save(target, 'payload', '-v7'); app.logMessage("视图数据已保存：" + string(target), "info");
+            catch exception
+                app.showError("视图数据保存失败", exception);
             end
-            target = fullfile(folder, file); save(target, 'payload', '-v7'); app.logMessage("视图数据已保存：" + string(target), "info");
         end
     end
 
@@ -507,11 +528,15 @@ classdef LfpApp < handle
             app.Datasets(index).channelLabels = string(app.Data.channelLabels(:));
             app.Datasets(index).units = string(app.Data.units);
             app.Datasets(index).metadata = app.Data.metadata;
+            displayRange = [];
+            if isfield(app.Controls, 'DisplayStart') && isgraphics(app.Controls.DisplayStart)
+                displayRange = [app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value];
+            end
             app.Datasets(index).analysisResults = struct('cleanData', app.CleanData, ...
                 'artifactResult', app.ArtifactResult, 'beforePsd', app.BeforePsd, ...
                 'psdResult', app.PsdResult, 'modelResult', app.ModelResult, ...
                 'bandResult', app.BandResult, 'analysisData', app.AnalysisData, ...
-                'snapshot', app.LastRunSnapshot, 'cache', app.Cache);
+                'snapshot', app.LastRunSnapshot, 'cache', app.Cache, 'displayRange', displayRange);
             if ~isempty(fieldnames(app.AnalysisData)), app.Datasets(index).status = "已完成"; else, app.Datasets(index).status = "已导入"; end
         end
 
@@ -549,8 +574,14 @@ classdef LfpApp < handle
             end
             [timeStart, timeEnd] = app.timeBounds(app.Data);
             if isfield(app.Controls, 'AnalysisStart')
-                app.Controls.AnalysisStart.Value = timeStart; app.Controls.AnalysisEnd.Value = timeEnd;
-                app.Controls.DisplayStart.Value = timeStart; app.Controls.DisplayEnd.Value = timeEnd;
+                analysisRange = [timeStart timeEnd]; displayRange = [timeStart timeEnd];
+                savedSnapshot = get_field_local(results, 'snapshot', struct());
+                savedAnalysis = get_field_local(savedSnapshot, 'analysisRange', []);
+                savedDisplay = get_field_local(results, 'displayRange', []);
+                if app.isValidTimeRange(savedAnalysis, timeStart, timeEnd), analysisRange = double(savedAnalysis(:)'); end
+                if app.isValidTimeRange(savedDisplay, timeStart, timeEnd), displayRange = double(savedDisplay(:)'); end
+                app.Controls.AnalysisStart.Value = analysisRange(1); app.Controls.AnalysisEnd.Value = analysisRange(2);
+                app.Controls.DisplayStart.Value = displayRange(1); app.Controls.DisplayEnd.Value = displayRange(2);
             end
             app.AppState.selectedDatasets = app.selectedDatasetIndices();
             app.AppState.selectedChannels = 1:size(entry.signal,2);
@@ -920,8 +951,8 @@ classdef LfpApp < handle
         function buildResultTabs(app, parent)
             tabs = uitabgroup(parent, 'SelectionChangedFcn', @(s,e)app.onResultTabChanged(s,e)); app.Tabs.Results = tabs;
             rawTab = uitab(tabs, 'Title', '原始与伪迹');
-            g = uigridlayout(rawTab, [4 1]); g.RowHeight = {34, '1x', '1x', 150};
-            rawControls = uigridlayout(g, [1 6]); rawControls.Layout.Row = 1; rawControls.ColumnWidth = {'fit', 'fit', 'fit', '1x', 'fit', 'fit'};
+            g = uigridlayout(rawTab, [4 1]); g.RowHeight = {42, '1x', '1x', 150};
+            rawControls = uigridlayout(g, [1 6]); rawControls.Layout.Row = 1; rawControls.ColumnWidth = {'fit', 'fit', 'fit', '1x', 110, 110};
             app.Controls.RawDatasetDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.RawChannelDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -939,8 +970,8 @@ classdef LfpApp < handle
             app.Controls.CleanAxes = uiaxes(cleanPlotGrid); title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
             app.Controls.ArtifactTable = uitable(g, 'ColumnName', {'artifactType','startSample','endSample','startTime','endTime','channel','score','threshold','method'}); app.Controls.ArtifactTable.Layout.Row=4;
 
-            psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [3 1]); g.RowHeight = {36, '1x', 70};
-            psdControls = uigridlayout(g, [1 7]); psdControls.Layout.Row = 1; psdControls.ColumnWidth = {'fit', 'fit', 'fit', 'fit', '1x', 'fit', 'fit'};
+            psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [3 1]); g.RowHeight = {42, '1x', 70};
+            psdControls = uigridlayout(g, [1 7]); psdControls.Layout.Row = 1; psdControls.ColumnWidth = {'fit', 'fit', 'fit', 'fit', '1x', 110, 110};
             app.Controls.PsdDatasetDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.PsdChannelDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -957,8 +988,8 @@ classdef LfpApp < handle
             app.Controls.PsdAxes = uiaxes(psdPlotGrid); grid(app.Controls.PsdAxes, 'on');
             app.Controls.PsdInfoResult = uitextarea(g, 'Editable', 'off', 'Value', {'尚未计算 PSD'}); app.Controls.PsdInfoResult.Layout.Row=3;
 
-            tfTab = uitab(tabs, 'Title', '时频分析'); g = uigridlayout(tfTab, [3 1]); g.RowHeight = {36, '1x', 28};
-            tfControls = uigridlayout(g, [1 8]); tfControls.Layout.Row = 1; tfControls.ColumnWidth = {'fit', 'fit', 'fit', 90, 90, '1x', 'fit', 'fit'};
+            tfTab = uitab(tabs, 'Title', '时频分析'); g = uigridlayout(tfTab, [3 1]); g.RowHeight = {42, '1x', 28};
+            tfControls = uigridlayout(g, [1 8]); tfControls.Layout.Row = 1; tfControls.ColumnWidth = {'fit', 'fit', 'fit', 90, 90, '1x', 110, 110};
             app.Controls.TfDatasetDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.TfChannelDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -973,8 +1004,8 @@ classdef LfpApp < handle
             app.Controls.PsdTimeFrequencyAxes = uiaxes(g); app.Controls.PsdTimeFrequencyAxes.Layout.Row=2; grid(app.Controls.PsdTimeFrequencyAxes, 'on');
             app.Controls.TfInfoResult = uilabel(g, 'Text', '尚未计算时频结果', 'WordWrap', 'on'); app.Controls.TfInfoResult.Layout.Row=3;
 
-            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [3 1]); g.RowHeight = {34, '1x', 170};
-            fooofControls = uigridlayout(g, [1 5]); fooofControls.Layout.Row = 1; fooofControls.ColumnWidth = {'fit', 'fit', '1x', 'fit', 'fit'};
+            fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [3 1]); g.RowHeight = {42, '1x', 170};
+            fooofControls = uigridlayout(g, [1 5]); fooofControls.Layout.Row = 1; fooofControls.ColumnWidth = {'fit', 'fit', '1x', 110, 110};
             app.Controls.FooofDatasetDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.FooofChannelDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -989,8 +1020,8 @@ classdef LfpApp < handle
             app.Controls.FooofAxes = app.Controls.FooofModelAxes; % compatibility for existing save/export callers
             app.Controls.FooofTable = uitable(g, 'ColumnName', {'CF_Hz','PW_log10','BW_Hz','peakBand'}); app.Controls.FooofTable.Layout.Row=3;
 
-            bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [3 1]); g.RowHeight = {34, '1x', 170};
-            bandControls = uigridlayout(g, [1 3]); bandControls.Layout.Row = 1; bandControls.ColumnWidth = {'1x', 'fit', 'fit'};
+            bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [3 1]); g.RowHeight = {42, '1x', 170};
+            bandControls = uigridlayout(g, [1 3]); bandControls.Layout.Row = 1; bandControls.ColumnWidth = {'1x', 110, 110};
             uilabel(bandControls, 'Text', '按频段或通道查看功率；多数据集比较使用 grouped bar', 'WordWrap', 'on');
             app.Controls.BandSaveFigure = uibutton(bandControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("band",e));
             app.Controls.BandSaveData = uibutton(bandControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("band",e));
@@ -1045,6 +1076,7 @@ classdef LfpApp < handle
             fileMegabytes = get_field_local(inspection, 'fileSizeBytes', 0) / 1048576;
             estimatedRows = get_field_local(inspection, 'estimatedRowCount', NaN);
             dialog = uifigure('Name', 'CSV 导入确认', 'WindowStyle', 'modal', 'Position', [120 100 1200 700]);
+            app.ImportDialog = dialog;
             dg = uigridlayout(dialog, [8 4]); dg.RowHeight = {230, app.UiStyle.controlHeight, app.UiStyle.controlHeight, app.UiStyle.controlHeight, app.UiStyle.controlHeight, app.UiStyle.controlHeight, '1x', app.UiStyle.controlHeight + 4}; dg.ColumnWidth = {'fit', '1x', 'fit', '1x'};
             preview = uitable(dg, 'Data', inspection.preview, 'ColumnEditable', false); preview.Layout.Row = 1; preview.Layout.Column = [1 4];
             noteText = sprintf('检测结果：%s | 文件 %.2f MB | 预计约 %.0f 行 | 预览 %.3f s | %s', ...
@@ -1068,12 +1100,14 @@ classdef LfpApp < handle
             dialog.CloseRequestFcn = @(s,e)uiresume(dialog);
             uiwait(dialog);
             if isgraphics(dialog), delete(dialog); end
+            if isequal(app.ImportDialog, dialog), app.ImportDialog = []; end
         end
 
         function finishImport(app, dialog, filename, controls)
             progressDialog = [];
             importStarted = tic;
             try
+                if app.ClosingRequested, error('LFP:UserCancelled', '窗口正在关闭。'); end
                 controls.importButton.Enable = 'off';
                 controls.status.Text = 'Reading CSV...';
                 progressDialog = uiprogressdlg(dialog, 'Title', '导入 CSV', ...
@@ -1120,7 +1154,6 @@ classdef LfpApp < handle
                     'estimatedMemoryBytes', get_field_local(data.metadata, 'estimatedMemoryBytes', NaN), ...
                     'strategy', get_field_local(data.metadata, 'importStrategy', "unknown"));
                 data.metadata.importPerformance = app.Performance.lastImport;
-                data.metadata.importPerformance = app.Performance.lastImport;
                 app.setData(data);
                 app.logMessage(sprintf('Import：%.3f s | %d samples × %d channels | %.2f MB estimated arrays', ...
                     importSeconds, size(data.signal,1), size(data.signal,2), app.Performance.lastImport.estimatedMemoryBytes/1048576), "timing");
@@ -1138,15 +1171,16 @@ classdef LfpApp < handle
             end
         end
 
-        function updateImportProgress(~, progressDialog, statusLabel, fraction, message)
-            if isempty(progressDialog) || ~isvalid(progressDialog), return; end
+        function updateImportProgress(app, progressDialog, statusLabel, fraction, message)
+            if app.ClosingRequested || isempty(progressDialog) || ~isvalid(progressDialog), return; end
             progressDialog.Value = max(0, min(1, fraction));
             progressDialog.Message = char(message);
             if isgraphics(statusLabel), statusLabel.Text = char(message); end
             drawnow limitrate;
         end
 
-        function checkImportCancellation(~, progressDialog)
+        function checkImportCancellation(app, progressDialog)
+            if app.ClosingRequested, error('LFP:UserCancelled', '窗口正在关闭。'); end
             drawnow limitrate;
             if ~isempty(progressDialog) && isvalid(progressDialog) && progressDialog.CancelRequested
                 error('LFP:UserCancelled', '用户取消了 CSV 导入。');
@@ -1240,7 +1274,7 @@ classdef LfpApp < handle
             app.Controls.ArtifactHighpass.Value = cfg.artifact.strictHighpassHz; app.Controls.ArtifactStrictHFZ.Value = cfg.artifact.strictHighFrequencyZ;
             app.Controls.ArtifactStrictDerivativeZ.Value = cfg.artifact.strictDerivativeZ; app.Controls.ArtifactStrictRangeZ.Value = cfg.artifact.strictRangeZ;
             app.Controls.ArtifactLineNoise.Value = cfg.artifact.lineNoiseDetection;
-            app.Controls.PsdMethod.Value = char(get_field_local(cfg.psd, 'method', "welch"));
+            app.Controls.PsdMethod.Value = char(get_field_local(cfg.psd, 'method', "multitaper"));
             app.Controls.PsdWindow.Value = cfg.psd.windowLengthSec; app.Controls.PsdOverlap.Value = cfg.psd.overlapFraction; app.Controls.PsdNfft.Value = cfg.psd.nfft;
             app.Controls.PsdTaper.Value = char(get_field_local(cfg.psd, 'taper', "hann"));
             mt = get_field_local(cfg.psd, 'multitaper', struct());
@@ -1736,38 +1770,83 @@ classdef LfpApp < handle
 
         function renderTimeFrequency(app)
             if ~isfield(app.Controls, 'PsdTimeFrequencyAxes') || ~isgraphics(app.Controls.PsdTimeFrequencyAxes), return; end
-            cla(app.Controls.PsdTimeFrequencyAxes);
-            % MATLAB's headless uiaxes renderer can block on imagesc.  A
-            % hidden GUI is used by automated tests and batch smoke checks;
-            % keep the result state available without attempting a display.
-            if isgraphics(app.Figure) && strcmp(app.Figure.Visible, 'off')
-                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text='时频结果已计算（隐藏窗口不渲染图像）。'; end
+            ax = app.Controls.PsdTimeFrequencyAxes;
+            if isfield(app.Controls,'TfColorbar') && isgraphics(app.Controls.TfColorbar), delete(app.Controls.TfColorbar); end
+            cla(ax, 'reset');
+            % uiaxes image rendering is not supported reliably by MATLAB's
+            % headless/hidden graphics backend.  Keep the numerical result
+            % and a clear state message; a visible GUI renders the image.
+            if ~isempty(app.Figure) && isgraphics(app.Figure) && strcmp(app.Figure.Visible, 'off')
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text = '时频结果已计算（隐藏窗口不渲染图像；显示窗口后可查看）。'; end
                 return;
             end
-            if isempty(fieldnames(app.PsdResult)) || ~isfield(app.PsdResult, 'timeFrequency') || ~isstruct(app.PsdResult.timeFrequency) || ~isfield(app.PsdResult.timeFrequency, 'power')
-                title(app.Controls.PsdTimeFrequencyAxes, '尚未计算时频结果');
+            if isempty(fieldnames(app.PsdResult)) || ~isfield(app.PsdResult, 'timeFrequency') || ...
+                    ~isstruct(app.PsdResult.timeFrequency) || ~isfield(app.PsdResult.timeFrequency, 'power')
+                title(ax, '尚未计算时频结果'); xlabel(ax, 'Time (s)'); ylabel(ax, 'Frequency (Hz)');
                 if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text='尚未计算时频结果'; end
                 return;
             end
-            tf=app.PsdResult.timeFrequency; labels=string(get_field_local(app.PsdResult,'channelLabels',app.Data.channelLabels(:))); labels=labels(:);
-            channel=1; if isfield(app.Controls,'TfChannelDropDown'), channel=app.channelIndexFromControl(app.Controls.TfChannelDropDown,labels); end
-            values=tf.power(:,:,min(channel,size(tf.power,3))); scale=string(get_field_local(tf,'powerScale','linear'));
-            if scale=="log10", displayValues=log10(max(values,realmin)); displayUnit='log10(power)'; elseif scale=="dB", displayValues=10*log10(max(values,realmin)); displayUnit='Power (dB)'; else, displayValues=values; displayUnit=string(get_field_local(tf,'powerUnits','units^2/Hz')); end
-            imagesc(app.Controls.PsdTimeFrequencyAxes, tf.timeSeconds, tf.frequencyHz, displayValues); axis(app.Controls.PsdTimeFrequencyAxes,'xy'); colorbar(app.Controls.PsdTimeFrequencyAxes); xlabel(app.Controls.PsdTimeFrequencyAxes,'Time (s)'); ylabel(app.Controls.PsdTimeFrequencyAxes,'Frequency (Hz)');
-            title(app.Controls.PsdTimeFrequencyAxes, sprintf('时频功率 | %s | %s',labels(channel),get_field_local(tf,'method','unknown')),'Interpreter','none'); app.applyFrequencyLimits(app.Controls.PsdTimeFrequencyAxes,tf.frequencyHz);
-            finite=displayValues(isfinite(displayValues)); mode='auto';
-            if isfield(app.Controls,'TfColorMode'), mode=char(app.Controls.TfColorMode.Value); end
-            if strcmp(mode,'手动') && isfield(app.Controls,'TfColorLow') && isfield(app.Controls,'TfColorHigh')
-                low=app.Controls.TfColorLow.Value; high=app.Controls.TfColorHigh.Value;
-            elseif isempty(finite)
-                low=0; high=1;
-            elseif startsWith(string(mode),'自动（5%')
-                low=percentile_local(finite,5); high=percentile_local(finite,95);
-            else
-                low=min(finite); high=max(finite);
+            tf = app.PsdResult.timeFrequency;
+            labels = string(get_field_local(app.PsdResult,'channelLabels',app.Data.channelLabels(:))); labels = labels(:);
+            freq = double(get_field_local(tf,'frequencyHz',[])); time = double(get_field_local(tf,'timeSeconds',[])); power = get_field_local(tf,'power',[]);
+            if isempty(freq) || isempty(time) || ~isnumeric(power) || any(~isfinite(freq)) || any(~isfinite(time)) || any(diff(freq)<=0) || any(diff(time)<0)
+                title(ax, '时频坐标无效'); xlabel(ax, 'Time (s)'); ylabel(ax, 'Frequency (Hz)');
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text='时频结果的时间/频率轴无效，未绘图。'; end
+                return;
             end
-            if isfinite(low) && isfinite(high) && high>low, caxis(app.Controls.PsdTimeFrequencyAxes,[low high]); end
-            if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text=sprintf('通道：%s | 方法：%s | 显示：%s | 窗长 %.3g s，步长 %.3g s | 色限 [%.3g %.3g]',labels(channel),get_field_local(tf,'method','unknown'),displayUnit,get_field_local(tf,'windowSeconds',NaN),get_field_local(tf,'stepSeconds',NaN),low,high); end
+            freq = freq(:); time = time(:)'; nFreq = numel(freq); nTime = numel(time);
+            if ndims(power) == 2, power = reshape(power, size(power,1), size(power,2), 1); end
+            sz = size(power);
+            if sz(1) == nTime && sz(2) == nFreq
+                power = permute(power, [2 1 3]);
+            elseif sz(1) ~= nFreq || sz(2) ~= nTime
+                title(ax, '时频功率矩阵维度不匹配'); xlabel(ax, 'Time (s)'); ylabel(ax, 'Frequency (Hz)');
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text = sprintf('矩阵 [%s]，期望 [频率=%d × 时间=%d × 通道]。', mat2str(sz), nFreq, nTime); end
+                return;
+            end
+            nChannels = size(power,3); channel = 1;
+            if isfield(app.Controls,'TfChannelDropDown'), channel = app.channelIndexFromControl(app.Controls.TfChannelDropDown,labels); end
+            channel = min(max(1, channel), nChannels);
+            values = double(power(:,:,channel)); scale = lower(string(get_field_local(tf,'powerScale','linear')));
+            positive = values > 0 & isfinite(values);
+            if scale == "log10"
+                displayValues = NaN(size(values)); displayValues(positive) = log10(values(positive)); displayUnit = 'log10(power)';
+            elseif scale == "db"
+                displayValues = NaN(size(values)); displayValues(positive) = 10*log10(values(positive)); displayUnit = 'Power (dB)';
+            else
+                displayValues = values; displayUnit = char(string(get_field_local(tf,'powerUnits','units^2/Hz')));
+            end
+            finite = displayValues(isfinite(displayValues));
+            if isempty(finite)
+                title(ax, '时频结果无有效功率'); xlabel(ax, 'Time (s)'); ylabel(ax, 'Frequency (Hz)');
+                if isfield(app.Controls,'TfInfoResult'), app.Controls.TfInfoResult.Text = sprintf('通道 %s 无有效时频功率值。', labels(min(channel,numel(labels)))); end
+                return;
+            end
+            imagesc(ax, time, freq, displayValues); axis(ax, 'xy');
+            app.Controls.TfColorbar = colorbar(ax); app.Controls.TfColorbar.Label.String = displayUnit;
+            xlabel(ax, 'Time (s)'); ylabel(ax, 'Frequency (Hz)');
+            title(ax, sprintf('时频功率 | %s | %s', labels(min(channel,numel(labels))), get_field_local(tf,'method','unknown')), 'Interpreter','none');
+            tfRange = [app.Controls.TfFreqLow.Value app.Controls.TfFreqHigh.Value];
+            lowFreq = max(min(freq), tfRange(1)); highFreq = min(max(freq), tfRange(2));
+            if highFreq > lowFreq, ylim(ax, [lowFreq highFreq]); end
+            mode = 'auto'; if isfield(app.Controls,'TfColorMode'), mode = char(app.Controls.TfColorMode.Value); end
+            if strcmp(mode,'手动') && isfield(app.Controls,'TfColorLow') && isfield(app.Controls,'TfColorHigh')
+                low = app.Controls.TfColorLow.Value; high = app.Controls.TfColorHigh.Value;
+            elseif startsWith(string(mode),'自动（5%')
+                low = percentile_local(finite,5); high = percentile_local(finite,95);
+            else
+                low = min(finite); high = max(finite);
+            end
+            if ~isfinite(low) || ~isfinite(high), low = min(finite); high = max(finite); end
+            if high == low
+                delta = max(abs(low)*1e-6, 1e-12); low = low-delta; high = high+delta;
+            end
+            if high > low, caxis(ax, [low high]); end
+            if isfield(app.Controls,'TfInfoResult')
+                app.Controls.TfInfoResult.Text = sprintf('通道：%s | 方法：%s | 显示：%s | 矩阵 %d×%d | 窗长 %.3g s，步长 %.3g s | 色限 [%.3g %.3g]', ...
+                    labels(min(channel,numel(labels))), get_field_local(tf,'method','unknown'), displayUnit, nFreq, nTime, ...
+                    get_field_local(tf,'windowSeconds',NaN), get_field_local(tf,'stepSeconds',NaN), low, high);
+            end
         end
 
         function renderFooof(app)
@@ -1924,6 +2003,12 @@ classdef LfpApp < handle
             end
         end
 
+        function tf = isValidTimeRange(~, value, lowerBound, upperBound)
+            value = double(value(:)');
+            tf = numel(value) == 2 && all(isfinite(value)) && value(2) > value(1) && ...
+                value(1) >= lowerBound && value(2) <= upperBound;
+        end
+
         function values = parseIndexList(~, textValue)
             token=string(textValue); if strlength(strtrim(token))==0, values=[]; return; end
             token=replace(token,'，',','); parts=split(token,','); values=[];
@@ -1934,7 +2019,37 @@ classdef LfpApp < handle
         end
 
         function finishRun(app)
-            app.IsRunning=false; app.setControlsEnabled(true); app.Controls.CancelButton.Enable='off'; app.Controls.ArtifactReconstruct.Enable='off'; app.refreshDependencyStatus();
+            app.IsRunning = false;
+            if app.ClosingRequested
+                app.finishClose();
+                return;
+            end
+            if isempty(app.Figure) || ~isgraphics(app.Figure), return; end
+            try
+                app.setControlsEnabled(true);
+                app.Controls.CancelButton.Enable = 'off';
+                app.Controls.ArtifactReconstruct.Enable = 'off';
+                app.refreshDependencyStatus();
+            catch exception
+                app.logMessage("运行结束清理失败：" + string(exception.message), 'error');
+            end
+        end
+
+        function finishClose(app)
+            % Idempotent final close step.  No close all/delete-all-timer is
+            % used; only resources owned by this app are released.
+            app.ClosingRequested = true;
+            try
+                if ~isempty(app.TaskManager), app.TaskManager.requestCancel(); end
+            catch exception
+                app.logMessage("取消任务时出错：" + string(exception.message), 'warning');
+            end
+            if ~isempty(app.ImportDialog) && isgraphics(app.ImportDialog)
+                try, app.ImportDialog.Visible = 'off'; delete(app.ImportDialog); catch, end
+            end
+            if ~isempty(app.Figure) && isgraphics(app.Figure)
+                try, delete(app.Figure); catch exception, app.logMessage("关闭窗口时出错：" + string(exception.message), 'error'); end
+            end
         end
 
         function setControlsEnabled(app, enabled)
@@ -1951,6 +2066,7 @@ classdef LfpApp < handle
         end
 
         function setProgress(app, fraction, message)
+            if app.ClosingRequested || isempty(app.Figure) || ~isgraphics(app.Figure), return; end
             fraction=max(0,min(1,fraction));
             if isfield(app.Controls,'ProgressGauge') && isgraphics(app.Controls.ProgressGauge), app.Controls.ProgressGauge.Value=fraction; end
             app.Controls.ProgressLabel.Text=sprintf('%.0f%%',100*fraction);
@@ -1959,13 +2075,15 @@ classdef LfpApp < handle
         end
 
         function checkCancellation(app)
-            drawnow limitrate;
+            if app.ClosingRequested, error('LFP:UserCancelled','窗口正在关闭。'); end
+            if ~isempty(app.Figure) && isgraphics(app.Figure), drawnow limitrate; end
             if app.CancelRequested || (~isempty(app.TaskManager) && app.TaskManager.CancelRequested)
                 error('LFP:UserCancelled','用户取消了本次运行。');
             end
         end
 
         function setStatus(app, message, level)
+            if app.ClosingRequested || ~isfield(app.Controls,'StatusLabel') || ~isgraphics(app.Controls.StatusLabel), return; end
             app.Controls.StatusLabel.Text=string(message); if strcmp(level,'error'), app.Controls.StatusLabel.FontColor=[.75 0 0]; elseif strcmp(level,'warning'), app.Controls.StatusLabel.FontColor=[.75 .35 0]; else, app.Controls.StatusLabel.FontColor=[0 .25 .5]; end
         end
 
