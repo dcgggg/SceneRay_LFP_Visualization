@@ -80,7 +80,7 @@ GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分�
 
 “分析时间范围”和“波形显示范围”彼此独立。修改颜色、坐标或显示范围后使用“重新绘图”；修改 PSD、FOOOF、频段或伪迹参数会标记结果过期，必须重新运行。GUI 中的“伪迹重建”暂时禁用，默认只保存原始数据、mask、事件和 NaN 显示副本。没有有效时间列或时间间隔不规则时，GUI 会阻止需要均匀采样的 PSD 分析，并提示修正导入设置。
 
-GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出 band-power/processing-history CSV 和 PNG 总览图。自动保存选项使用带时间戳的子目录，不覆盖已有结果。
+GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出标准 `signal_data.csv`、`psd.csv`、`time_frequency.mat`、band-power/processing-history CSV 和 PNG 总览图。自动保存选项使用带时间戳的子目录，不覆盖已有结果；完整 MAT 会同时保留导入映射、单位、PSD/specparam/时频参数与 processingHistory。
 
 v0.6.1 还包含以下 GUI 稳定性修复：CSV 预览、信息栏、伪迹事件表和频段结果表会将字符串/分类值转换为 `uitable` 可显示的字符值，但不会修改原始导入数据或分析结果表；确认导入时会复用已经完成预览的 CSV 内容，SceneRay 数据行解析也采用预分配方式以减少大文件导入耗时。
 

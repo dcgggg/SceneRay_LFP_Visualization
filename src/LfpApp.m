@@ -1020,7 +1020,8 @@ classdef LfpApp < handle
             if ~isempty(m.peakParams), centers=[m.peakParams.CF]; xline(app.Controls.FooofAxes,centers,'--','Color',[.1 .6 .1]); end
             kneeText = '';
             if isfield(m.aperiodicParams, 'knee') && isfinite(m.aperiodicParams.knee), kneeText = sprintf(' | knee %.4g', m.aperiodicParams.knee); end
-            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | status=%s | mode=%s | offset %.3f | exponent %.3f%s | R² %.3f | error %.3f',app.displayTitle('specparam（原FOOOF）'),m.fitStatus,m.aperiodicParams.mode,m.aperiodicParams.offset,m.aperiodicParams.exponent,kneeText,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best'); grid(app.Controls.FooofAxes,'on');
+            modeText = get_field_local(m.aperiodicParams, 'mode', "fixed");
+            hold(app.Controls.FooofAxes,'off'); app.applyFrequencyLimits(app.Controls.FooofAxes, f); xlabel(app.Controls.FooofAxes,'Frequency (Hz)'); ylabel(app.Controls.FooofAxes,powerLabel); title(app.Controls.FooofAxes,sprintf('%s | status=%s | mode=%s | offset %.3f | exponent %.3f%s | R² %.3f | error %.3f',app.displayTitle('specparam（原FOOOF）'),m.fitStatus,modeText,m.aperiodicParams.offset,m.aperiodicParams.exponent,kneeText,m.rSquared,m.fitError),'Interpreter','none'); legend(app.Controls.FooofAxes,'Location','best'); grid(app.Controls.FooofAxes,'on');
             if ~isempty(m.peakParams), rows=cell(numel(m.peakParams),4); for k=1:numel(m.peakParams), rows{k,1}=m.peakParams(k).CF; rows{k,2}=m.peakParams(k).PW; rows{k,3}=m.peakParams(k).BW; rows{k,4}=char(m.peakParams(k).peakBand); end; app.Controls.FooofTable.Data=rows; end
             app.Controls.FooofTable.ColumnName={'CF_Hz','PW_log10','BW_Hz','peakBand'};
         end

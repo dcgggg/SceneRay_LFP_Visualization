@@ -23,7 +23,11 @@ else
         error('LFP:InvalidChannelIndex', 'ChannelIndex exceeds the number of channels.');
     end
 end
-time = (0:nSamples-1)' / data.fs;
+if isfield(data, 'time') && numel(data.time) == nSamples && all(isfinite(data.time))
+    time = double(data.time(:));
+else
+    time = (0:nSamples-1)' / data.fs;
+end
 sampleLimit = min(nSamples, max(1, round(options.MaxPlotSeconds * data.fs)));
 
 figureHandle = figure('Visible', char(options.Visible), 'Color', 'w', ...
