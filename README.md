@@ -28,7 +28,7 @@
 | --- | --- | --- | --- |
 | MATLAB R2022b 或更高版本 | 运行全部分析、绘图和批处理函数；核心 PSD 使用 `fft`、`interp1` 等基础函数 | 必需 | [MATLAB](https://www.mathworks.com/products/matlab.html) |
 | MATLAB Unit Testing Framework | 运行 `tests/` 中的 `matlab.unittest` 自动化测试 | 仅开发/测试必需 | [MATLAB Unit Testing Framework](https://www.mathworks.com/help/matlab/matlab-unit-testing-framework.html) |
-| Signal Processing Toolbox | 由 `lfp_project_startup` 检测，可用于后续信号处理加速；当前手写 Welch PSD 不依赖它 | 可选 | [Signal Processing Toolbox](https://www.mathworks.com/products/signal.html) |
+| Signal Processing Toolbox | 由 `lfp_project_startup` 检测；Welch 与 DPSS multitaper 均提供基础 MATLAB 实现，可用工具箱加速但不是运行必需 | 可选 | [Signal Processing Toolbox](https://www.mathworks.com/products/signal.html) |
 | Statistics and Machine Learning Toolbox | 由 `lfp_project_startup` 检测；当前 fixed/no-knee 拟合提供 MATLAB 基础实现，不依赖它 | 可选 | [Statistics and Machine Learning Toolbox](https://www.mathworks.com/products/statistics.html) |
 | FieldTrip | `cfg.artifact.method = "fieldtrip"` 时调用 `ft_artifact_zvalue`；默认仍使用 native backend | 可选 | [FieldTrip](https://www.fieldtriptoolbox.org/) |
 | FOOOF/specparam | 提供功率谱参数化定义和报告风格参考；本项目使用 MATLAB 原生 fixed/knee 实现，不在运行时调用 Python | 参考资料，不是运行依赖 | [FOOOF/specparam documentation](https://fooof-tools.github.io/fooof/) |
@@ -112,7 +112,7 @@ end
 
 结果中的 `channelLabels`、`channelNames`、`channelCount` 和 `ipgSN` 会保留到每个文件的结果结构与图标题中。批处理只对每个文件执行一次导入、伪影、PSD、参数化和频段功率计算；绘图和导出是可选步骤。
 
-40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 直接使用 PSD 实际频率网格，旧配置中的 `interpolateLineNoise` 只会被忽略并记录迁移提示。`cfg.psd.frequencyRange` 默认 `[1 40]`，`cfg.fooof.frequencyRange` 默认 `[1 35]`；超出 PSD 范围的频带返回 NaN，而不是虚假功率。Multitaper 使用真正的 DPSS 多窗估计，`NW` 为主输入，`W=NW/T`、总平滑带宽约为 `2W`，默认 `K=floor(2NW)-1`。`cfg.psd.timeFrequency` 控制滑窗时频图；无效窗口和伪影缺口保持 NaN，不压缩时间轴。
+40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 直接使用 PSD 实际频率网格，旧配置中的 `interpolateLineNoise` 只会被忽略并记录迁移提示。新的 PSD 默认方法为 `multitaper`，分析范围默认 `[1 35]` Hz；`cfg.fooof.frequencyRange` 默认 `[1 35]`。超出 PSD 范围的频带返回 NaN，而不是虚假功率。Multitaper 使用真正的 DPSS 多窗估计，`NW` 为主输入，`W=NW/T`、总平滑带宽约为 `2W`，默认 `K=floor(2NW)-1`。`cfg.psd.timeFrequency` 保留独立的滑窗时频范围（默认 `[1 40]` Hz），不因 PSD 上限改变；无效窗口和伪影缺口保持 NaN，不压缩时间轴。
 
 绘图函数支持 `cfg.plot.parent` 指定 Figure、uipanel 或 uitab；所有分析函数仍可在无 GUI 的 MATLAB 脚本中独立调用。`computeLfpPsd` 和 `computeBandPower` 也会返回带有 `processingHistory` 的结果结构，便于未来 GUI 或批处理保存审计轨迹。
 
@@ -154,7 +154,7 @@ docs/      架构、数据格式和算法说明
 
 ## 交互式绘图
 
-绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。GUI 波形默认显示 60 秒（`cfg.plot.maxPlotSeconds = 60`），可改为其他秒数或 `Inf`。超过 `cfg.plot.maxDisplayPoints` 的 Raw/Clean 波形只在显示层转换为峰谷包络，短尖峰仍可见；分析和导出始终使用完整数组。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
+绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。GUI 波形默认显示完整记录（`cfg.plot.maxPlotSeconds = Inf`），仍可改为具体秒数。超过 `cfg.plot.maxDisplayPoints` 的 Raw/Clean 波形只在显示层转换为峰谷包络，短尖峰仍可见；分析和导出始终使用完整数组。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
 
 性能测量、限制和可复现基准见 [docs/performance.md](docs/performance.md)。
 

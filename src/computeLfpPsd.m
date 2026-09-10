@@ -22,7 +22,7 @@ for index = 1:numel(required)
         error('LFP:InvalidPsdConfig', 'psdCfg.%s is required.', required{index});
     end
 end
-method = get_field(psdCfg, 'method', "welch");
+method = get_field(psdCfg, 'method', "multitaper");
 detrendMode = get_field(psdCfg, 'detrend', "constant");
 multitaper = get_field(psdCfg, 'multitaper', struct());
 progress = get_field(psdCfg, 'progressCallback', @(fraction, message)[]);

@@ -17,7 +17,7 @@ arguments
     options.TimeBandwidthProduct (1,1) double {mustBeFinite, mustBeGreaterThan(options.TimeBandwidthProduct, 0.5)} = 3.5
     options.TaperCount (1,1) double {mustBeInteger, mustBeNonnegative} = 0
     options.TaperWeighting (1,1) string {mustBeMember(options.TaperWeighting, "equal")} = "equal"
-    options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 40]
+    options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 35]
     options.ProgressCallback = []
     options.CancellationCheck = []
 end
