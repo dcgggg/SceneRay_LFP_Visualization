@@ -953,6 +953,7 @@ classdef LfpApp < handle
             rawTab = uitab(tabs, 'Title', '原始与伪迹');
             g = uigridlayout(rawTab, [4 1]); g.RowHeight = {42, '1x', '1x', 150};
             rawControls = uigridlayout(g, [1 6]); rawControls.Layout.Row = 1; rawControls.ColumnWidth = {'fit', 'fit', 'fit', '1x', 110, 110};
+            if isprop(rawControls, 'Scrollable'), rawControls.Scrollable = 'on'; end
             app.Controls.RawDatasetDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.RawChannelDropDown = uidropdown(rawControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -972,6 +973,7 @@ classdef LfpApp < handle
 
             psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [3 1]); g.RowHeight = {42, '1x', 70};
             psdControls = uigridlayout(g, [1 7]); psdControls.Layout.Row = 1; psdControls.ColumnWidth = {'fit', 'fit', 'fit', 'fit', '1x', 110, 110};
+            if isprop(psdControls, 'Scrollable'), psdControls.Scrollable = 'on'; end
             app.Controls.PsdDatasetDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.PsdChannelDropDown = uidropdown(psdControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -990,6 +992,7 @@ classdef LfpApp < handle
 
             tfTab = uitab(tabs, 'Title', '时频分析'); g = uigridlayout(tfTab, [3 1]); g.RowHeight = {42, '1x', 28};
             tfControls = uigridlayout(g, [1 8]); tfControls.Layout.Row = 1; tfControls.ColumnWidth = {'fit', 'fit', 'fit', 90, 90, '1x', 110, 110};
+            if isprop(tfControls, 'Scrollable'), tfControls.Scrollable = 'on'; end
             app.Controls.TfDatasetDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.TfChannelDropDown = uidropdown(tfControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -1006,6 +1009,7 @@ classdef LfpApp < handle
 
             fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）'); g = uigridlayout(fooofTab, [3 1]); g.RowHeight = {42, '1x', 170};
             fooofControls = uigridlayout(g, [1 5]); fooofControls.Layout.Row = 1; fooofControls.ColumnWidth = {'fit', 'fit', '1x', 110, 110};
+            if isprop(fooofControls, 'Scrollable'), fooofControls.Scrollable = 'on'; end
             app.Controls.FooofDatasetDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
                 'ValueChangedFcn', @(s,e)app.onDatasetDropDownChanged(s,e));
             app.Controls.FooofChannelDropDown = uidropdown(fooofControls, 'Items', {'(未加载)'}, 'Value', '(未加载)', ...
@@ -1022,6 +1026,7 @@ classdef LfpApp < handle
 
             bandTab = uitab(tabs, 'Title', '频段功率'); g = uigridlayout(bandTab, [3 1]); g.RowHeight = {42, '1x', 170};
             bandControls = uigridlayout(g, [1 3]); bandControls.Layout.Row = 1; bandControls.ColumnWidth = {'1x', 110, 110};
+            if isprop(bandControls, 'Scrollable'), bandControls.Scrollable = 'on'; end
             uilabel(bandControls, 'Text', '按频段或通道查看功率；多数据集比较使用 grouped bar', 'WordWrap', 'on');
             app.Controls.BandSaveFigure = uibutton(bandControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("band",e));
             app.Controls.BandSaveData = uibutton(bandControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("band",e));
