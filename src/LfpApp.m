@@ -311,6 +311,16 @@ classdef LfpApp < handle
             end
         end
 
+        function onPsdMethodChanged(app, ~, ~)
+            if isfield(app.Controls, 'PsdNW')
+                isMultitaper = string(app.Controls.PsdMethod.Value) == "multitaper";
+                app.Controls.PsdNW.Enable = ternary_local(isMultitaper, 'on', 'off');
+                app.Controls.PsdK.Enable = ternary_local(isMultitaper, 'on', 'off');
+                app.Controls.PsdTaper.Enable = ternary_local(~isMultitaper, 'on', 'off');
+            end
+            app.markChanged('psd');
+        end
+
         function onBandCellEdit(app, ~, ~)
             if ~app.IsRunning
                 app.invalidateStage("band", "频段边界已变更，需重新计算频段功率。");
@@ -398,6 +408,7 @@ classdef LfpApp < handle
             app.Controls.ProgressLabel = uilabel(bg, 'Text', '进度 0%', 'HorizontalAlignment', 'center');
             app.Controls.RunInfoLabel = uilabel(bg, 'Text', '原始数据保留；伪迹默认以 mask/NaN 显示', 'HorizontalAlignment', 'left');
             app.Controls.ResultStatusLabel = uilabel(bg, 'Text', '结果状态：未运行', 'HorizontalAlignment', 'right');
+            app.onPsdMethodChanged([], []);
         end
 
         function buildParameterTabs(app, parent)
@@ -419,8 +430,9 @@ classdef LfpApp < handle
             app.Controls.ArtifactMethodStatus = uilabel(g, 'Text', ''); app.Controls.ArtifactMethodStatus.Layout.Row = 12; app.Controls.ArtifactMethodStatus.Layout.Column = [1 3];
 
             psdTab = uitab(tabs, 'Title', 'PSD + 时频');
-            g = uigridlayout(psdTab, [20 2]); g.ColumnWidth = {180, '1x'}; g.RowHeight = repmat({26}, 1, 20);
+            g = uigridlayout(psdTab, [23 2]); g.ColumnWidth = {180, '1x'}; g.RowHeight = repmat({26}, 1, 23);
             app.Controls.PsdMethod = app.addDropDown(g, 1, 'PSD 方法', {'welch', 'multitaper'}, char(app.Config.psd.method), 'psd');
+            app.Controls.PsdMethod.ValueChangedFcn = @(s,e)app.onPsdMethodChanged(s,e);
             app.Controls.PsdWindow = app.addNumeric(g, 2, '窗长 T (s)', app.Config.psd.windowLengthSec, 'psd');
             app.Controls.PsdOverlap = app.addNumeric(g, 3, '重叠比例', app.Config.psd.overlapFraction, 'psd');
             app.Controls.PsdNfft = app.addNumeric(g, 4, 'NFFT（0=自动）', app.Config.psd.nfft, 'psd');
@@ -431,16 +443,20 @@ classdef LfpApp < handle
             app.Controls.PsdAggregation = app.addDropDown(g, 9, '窗口聚合', {'mean', 'median'}, char(app.Config.psd.aggregationMethod), 'psd');
             app.Controls.PsdNW = app.addNumeric(g, 10, 'Multitaper NW', app.Config.psd.multitaper.timeBandwidthProduct, 'psd');
             app.Controls.PsdK = app.addNumeric(g, 11, 'DPSS taper K', app.Config.psd.multitaper.taperCount, 'psd');
-            label = uilabel(g, 'Text', 'W=NW/T；总平滑带宽≈2W；默认 K=floor(2NW)-1'); label.Layout.Row = 12; label.Layout.Column = [1 3];
-            label = uilabel(g, 'Text', 'PSD 为线性功率；显示时可转 dB'); label.Layout.Row = 13; label.Layout.Column = [1 3];
+            app.Controls.PsdTaper = app.addDropDown(g, 12, 'Welch 窗函数', {'hann'}, char(app.Config.psd.taper), 'psd');
+            label = uilabel(g, 'Text', 'W=NW/T；总平滑带宽≈2W；默认 K=floor(2NW)-1'); label.Layout.Row = 13; label.Layout.Column = [1 3];
+            label = uilabel(g, 'Text', 'PSD 为线性功率；显示时可转 dB'); label.Layout.Row = 14; label.Layout.Column = [1 3];
             tf = get_field_local(app.Config.psd, 'timeFrequency', struct());
-            app.Controls.TfEnable = app.addCheck(g, 14, '启用时频图', get_field_local(tf, 'enabled', true), 'psd');
-            app.Controls.TfReuse = app.addCheck(g, 15, '时频复用 PSD 参数', get_field_local(tf, 'reusePsdParameters', true), 'psd');
-            app.Controls.TfWindow = app.addNumeric(g, 16, '时频窗长 (s)', get_field_local(tf, 'windowLengthSec', 1), 'psd');
-            app.Controls.TfStep = app.addNumeric(g, 17, '时频步长 (s)', get_field_local(tf, 'stepSeconds', .25), 'psd');
-            label = uilabel(g, 'Text', '步长为主要输入；重叠比例由窗长与步长派生'); label.Layout.Row = 18; label.Layout.Column = [1 3];
-            app.Controls.TfPowerScale = app.addDropDown(g, 19, '时频功率', {'linear', 'log10', 'dB'}, char(get_field_local(tf, 'powerScale', "log10")), 'plot');
-            app.Controls.PsdInfo = uilabel(g, 'Text', ''); app.Controls.PsdInfo.Layout.Row = 20; app.Controls.PsdInfo.Layout.Column = [1 3];
+            tfRange = get_field_local(tf, 'frequencyRange', [1 40]);
+            app.Controls.TfEnable = app.addCheck(g, 15, '启用时频图', get_field_local(tf, 'enabled', true), 'psd');
+            app.Controls.TfReuse = app.addCheck(g, 16, '时频复用 PSD 参数', get_field_local(tf, 'reusePsdParameters', true), 'psd');
+            app.Controls.TfWindow = app.addNumeric(g, 17, '时频窗长 (s)', get_field_local(tf, 'windowLengthSec', 1), 'psd');
+            app.Controls.TfStep = app.addNumeric(g, 18, '时频步长 (s)', get_field_local(tf, 'stepSeconds', .25), 'psd');
+            app.Controls.TfFreqLow = app.addNumeric(g, 19, '时频下限 (Hz)', tfRange(1), 'psd');
+            app.Controls.TfFreqHigh = app.addNumeric(g, 20, '时频上限 (Hz)', tfRange(2), 'psd');
+            label = uilabel(g, 'Text', '步长为主要输入；重叠比例由窗长与步长派生'); label.Layout.Row = 21; label.Layout.Column = [1 3];
+            app.Controls.TfPowerScale = app.addDropDown(g, 22, '时频功率', {'linear', 'log10', 'dB'}, char(get_field_local(tf, 'powerScale', "log10")), 'plot');
+            app.Controls.PsdInfo = uilabel(g, 'Text', ''); app.Controls.PsdInfo.Layout.Row = 23; app.Controls.PsdInfo.Layout.Column = [1 3];
 
             fooofTab = uitab(tabs, 'Title', 'specparam（原FOOOF）');
             g = uigridlayout(fooofTab, [10 2]); g.ColumnWidth = {170, '1x'}; g.RowHeight = repmat({26}, 1, 10);
@@ -670,6 +686,7 @@ classdef LfpApp < handle
             cfg.psd.nfft = app.Controls.PsdNfft.Value;
             cfg.psd.method = string(app.Controls.PsdMethod.Value);
             cfg.psd.detrend = "constant";
+            cfg.psd.taper = string(app.Controls.PsdTaper.Value);
             cfg.psd.multitaper.timeBandwidthProduct = app.Controls.PsdNW.Value;
             cfg.psd.multitaper.taperCount = app.Controls.PsdK.Value;
             cfg.psd.multitaper.weighting = "equal";
@@ -681,6 +698,7 @@ classdef LfpApp < handle
             cfg.psd.timeFrequency.reusePsdParameters = logical(app.Controls.TfReuse.Value);
             cfg.psd.timeFrequency.windowLengthSec = app.Controls.TfWindow.Value;
             cfg.psd.timeFrequency.stepSeconds = app.Controls.TfStep.Value;
+            cfg.psd.timeFrequency.frequencyRange = [app.Controls.TfFreqLow.Value app.Controls.TfFreqHigh.Value];
             cfg.psd.timeFrequency.powerScale = string(app.Controls.TfPowerScale.Value);
             cfg.fooof.frequencyRange = [app.Controls.FooofFreqLow.Value app.Controls.FooofFreqHigh.Value];
             cfg.fooof.peakWidthLimits = [app.Controls.FooofWidthLow.Value app.Controls.FooofWidthHigh.Value];
@@ -713,6 +731,7 @@ classdef LfpApp < handle
             app.Controls.ArtifactLineNoise.Value = cfg.artifact.lineNoiseDetection;
             app.Controls.PsdMethod.Value = char(get_field_local(cfg.psd, 'method', "welch"));
             app.Controls.PsdWindow.Value = cfg.psd.windowLengthSec; app.Controls.PsdOverlap.Value = cfg.psd.overlapFraction; app.Controls.PsdNfft.Value = cfg.psd.nfft;
+            app.Controls.PsdTaper.Value = char(get_field_local(cfg.psd, 'taper', "hann"));
             mt = get_field_local(cfg.psd, 'multitaper', struct());
             app.Controls.PsdNW.Value = get_field_local(mt, 'timeBandwidthProduct', 3.5);
             app.Controls.PsdK.Value = get_field_local(mt, 'taperCount', floor(2 * app.Controls.PsdNW.Value) - 1);
@@ -723,6 +742,8 @@ classdef LfpApp < handle
             app.Controls.TfReuse.Value = get_field_local(tf, 'reusePsdParameters', true);
             app.Controls.TfWindow.Value = get_field_local(tf, 'windowLengthSec', 1);
             app.Controls.TfStep.Value = get_field_local(tf, 'stepSeconds', .25);
+            tfRange = get_field_local(tf, 'frequencyRange', cfg.psd.frequencyRange);
+            app.Controls.TfFreqLow.Value = tfRange(1); app.Controls.TfFreqHigh.Value = tfRange(2);
             app.Controls.TfPowerScale.Value = char(get_field_local(tf, 'powerScale', "log10"));
             app.Controls.FooofFreqLow.Value = cfg.fooof.frequencyRange(1); app.Controls.FooofFreqHigh.Value = cfg.fooof.frequencyRange(2);
             app.Controls.FooofWidthLow.Value = cfg.fooof.peakWidthLimits(1); app.Controls.FooofWidthHigh.Value = cfg.fooof.peakWidthLimits(2); app.Controls.FooofMaxPeaks.Value = cfg.fooof.maxNumberPeaks;
@@ -731,6 +752,7 @@ classdef LfpApp < handle
             names = fieldnames(cfg.bands); bd = cell(numel(names), 3); for k = 1:numel(names), bd{k,1}=names{k}; bd{k,2}=cfg.bands.(names{k})(1); bd{k,3}=cfg.bands.(names{k})(2); end; app.Controls.BandTable.Data=bd;
             app.Controls.PlotFreqLow.Value = cfg.plot.frequencyRange(1); app.Controls.PlotFreqHigh.Value = cfg.plot.frequencyRange(2); app.Controls.PlotMaxSeconds.Value = cfg.plot.maxPlotSeconds;
             app.Controls.PlotFreqScale.Value = char(cfg.plot.frequencyScale); app.Controls.PlotPowerScale.Value = char(cfg.plot.powerScale); app.Controls.PlotShowLabels.Value = cfg.plot.showArtifactLabels; app.Controls.PlotFontSize.Value = cfg.plot.fontSize;
+            app.onPsdMethodChanged([], []);
         end
 
         function bands = readBandsFromTable(app)

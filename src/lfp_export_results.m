@@ -19,9 +19,46 @@ if ~isfolder(outputFolder)
     mkdir(outputFolder);
 end
 
-files = struct('mat', "", 'bandPowerCsv', "", 'processingLogCsv', "", 'figurePng', "");
+files = struct('mat', "", 'bandPowerCsv', "", 'processingLogCsv', "", 'figurePng', "", ...
+    'signalCsv', "", 'psdCsv', "", 'timeFrequencyMat', "");
 files.mat = fullfile(outputFolder, 'analysis_results.mat');
 save(files.mat, 'data', '-v7');
+
+% Export the canonical time/signal arrays without changing the MAT session.
+if isfield(data, 'signal') && isnumeric(data.signal)
+    if isfield(data, 'time') && numel(data.time) == size(data.signal, 1)
+        timeSeconds = double(data.time(:));
+    elseif isfield(data, 'fs') && isfinite(data.fs) && data.fs > 0
+        timeSeconds = (0:size(data.signal, 1)-1)' / double(data.fs);
+    else
+        timeSeconds = (0:size(data.signal, 1)-1)';
+    end
+    labels = get_labels(data, size(data.signal, 2));
+    variableNames = matlab.lang.makeUniqueStrings(matlab.lang.makeValidName(cellstr(labels)));
+    signalTable = array2table(double(data.signal), 'VariableNames', variableNames);
+    signalTable = addvars(signalTable, timeSeconds, 'Before', 1, 'NewVariableNames', 'timeSeconds');
+    files.signalCsv = fullfile(outputFolder, 'signal_data.csv');
+    writetable(signalTable, files.signalCsv);
+end
+
+if isfield(data, 'spectrum') && isfield(data.spectrum, 'frequencyHz') && isfield(data.spectrum, 'psd')
+    labels = get_labels(data.spectrum, size(data.spectrum.psd, 2));
+    variableNames = matlab.lang.makeUniqueStrings(matlab.lang.makeValidName(cellstr(labels)));
+    psdTable = array2table(double(data.spectrum.psd), 'VariableNames', variableNames);
+    psdTable = addvars(psdTable, double(data.spectrum.frequencyHz(:)), 'Before', 1, 'NewVariableNames', 'frequencyHz');
+    files.psdCsv = fullfile(outputFolder, 'psd.csv');
+    writetable(psdTable, files.psdCsv);
+end
+
+if isfield(data, 'spectrum') && isfield(data.spectrum, 'timeFrequency')
+    timeFrequency = data.spectrum.timeFrequency; %#ok<NASGU>
+    files.timeFrequencyMat = fullfile(outputFolder, 'time_frequency.mat');
+    save(files.timeFrequencyMat, 'timeFrequency', '-v7');
+elseif isfield(data, 'timeFrequency')
+    timeFrequency = data.timeFrequency; %#ok<NASGU>
+    files.timeFrequencyMat = fullfile(outputFolder, 'time_frequency.mat');
+    save(files.timeFrequencyMat, 'timeFrequency', '-v7');
+end
 
 if isfield(data, 'bandPower') && isfield(data.bandPower, 'table')
     files.bandPowerCsv = fullfile(outputFolder, 'band_power.csv');
@@ -57,5 +94,15 @@ end
 function close_if_valid(handle)
 if ~isempty(handle) && isgraphics(handle)
     close(handle);
+end
+end
+
+function labels = get_labels(data, nChannels)
+if isfield(data, 'channelLabels') && numel(data.channelLabels) == nChannels
+    labels = string(data.channelLabels(:));
+elseif isfield(data, 'channelNames') && numel(data.channelNames) == nChannels
+    labels = string(data.channelNames(:));
+else
+    labels = "channel_" + string((1:nChannels)');
 end
 end
