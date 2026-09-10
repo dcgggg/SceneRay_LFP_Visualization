@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## [0.9.0] - 2026-09-10
 
-- Incremental local development after v0.6.1; no remote release or push performed in this task.
+- Removed the time-frequency analysis module from the GUI, PSD execution chain, export path and dedicated tests; legacy time-frequency fields are ignored when loading older sessions.
+- Decoupled ordinary band-power analysis from specparam so PSD-derived total and relative power can run when specparam is unavailable or fails.
+- Added explicit band computability/status fields and stopped silently clipping bands outside the available PSD range.
+- Preserved independent per-dataset execution and report partial failures without presenting a failed specparam stage as successful.
+- Standardized user-facing documentation and GUI labels on specparam, while retaining legacy configuration field names for compatibility.
 - Replaced full-file `readcell` inspection with a bounded streaming preview, added a numeric `readmatrix` path for rectangular CSV files, and added a streaming SceneRay block parser with import progress/cancellation hooks and memory metadata.
 - Upgraded the native GUI to a multi-dataset session manager: multiple CSV files remain independent, each dataset keeps raw arrays and analysis results, and selected datasets can be run sequentially.
 - Added unified dataset table controls, per-result dataset/channel selectors, PSD single/multi/subplot views, grouped multi-dataset band bars, Gaussian component display, and per-tab PNG/SVG/FIG/MAT export actions.
