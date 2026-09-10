@@ -33,6 +33,9 @@ windowSamples = min(max(2, round(options.WindowSeconds * fs)), nSamples);
 if options.FrequencyRangeHz(2) <= options.FrequencyRangeHz(1)
     error('LFP:InvalidFrequencyRange', 'FrequencyRangeHz must be increasing.');
 end
+if isfinite(options.FrequencyRangeHz(2)) && options.FrequencyRangeHz(2) > fs / 2
+    error('LFP:FrequencyAboveNyquist', 'PSD upper frequency %.6g Hz exceeds Nyquist %.6g Hz.', options.FrequencyRangeHz(2), fs / 2);
+end
 if options.Nfft == 0, nfft = 2 ^ nextpow2(windowSamples); else, nfft = max(windowSamples, options.Nfft); end
 nw = options.TimeBandwidthProduct;
 if options.TaperCount == 0, taperCount = max(1, floor(2 * nw) - 1); else, taperCount = options.TaperCount; end

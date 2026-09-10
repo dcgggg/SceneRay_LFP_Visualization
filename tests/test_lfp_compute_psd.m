@@ -66,6 +66,13 @@ verifyTrue(testCase, isfield(result, 'windowPsd'));
 verifyEqual(testCase, result.channelLabels, "ch1");
 end
 
+function testRejectsFrequencyAboveNyquist(testCase)
+ensure_src_on_path(testCase);
+data = base_data(sin(2*pi*10*(0:999)'/100), 100);
+verifyError(testCase, @() lfp_compute_psd(data, FrequencyRangeHz=[1 60]), ...
+    'LFP:FrequencyAboveNyquist');
+end
+
 function data = base_data(signal, fs)
 data = struct('signal', signal, 'fs', fs, 'time', (0:size(signal,1)-1)'/fs, ...
     'channelLabels', "ch1", 'units', "uV", 'metadata', struct(), ...

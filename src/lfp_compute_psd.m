@@ -56,6 +56,9 @@ end
 if options.FrequencyRangeHz(2) <= options.FrequencyRangeHz(1)
     error('LFP:InvalidFrequencyRange', 'FrequencyRangeHz must be increasing.');
 end
+if isfinite(options.FrequencyRangeHz(2)) && options.FrequencyRangeHz(2) > fs / 2
+    error('LFP:FrequencyAboveNyquist', 'PSD upper frequency %.6g Hz exceeds Nyquist %.6g Hz.', options.FrequencyRangeHz(2), fs / 2);
+end
 window = hann_vector(windowSamples);
 normalization = fs * sum(window .^ 2);
 fullFrequencyHz = (0:floor(nfft / 2))' * fs / nfft;

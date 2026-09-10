@@ -27,6 +27,12 @@ end
 signal = double(data.signal);
 [nSamples, nChannels] = size(signal);
 fs = double(data.fs);
+if options.FrequencyRangeHz(2) <= options.FrequencyRangeHz(1)
+    error('LFP:InvalidFrequencyRange', 'FrequencyRangeHz must be increasing.');
+end
+if isfinite(options.FrequencyRangeHz(2)) && options.FrequencyRangeHz(2) > fs / 2
+    error('LFP:FrequencyAboveNyquist', '时频上限 %.6g Hz exceeds Nyquist %.6g Hz.', options.FrequencyRangeHz(2), fs / 2);
+end
 windowSamples = min(nSamples, max(1, round(options.WindowSeconds * fs)));
 stepSamples = max(1, round(options.StepSeconds * fs));
 if options.Nfft == 0
