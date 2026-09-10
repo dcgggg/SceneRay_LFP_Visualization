@@ -203,8 +203,7 @@ classdef LfpApp < handle
                 if ~app.CancelRequested
                     app.TaskManager.complete();
                     app.Performance.lastAnalysis = app.TaskManager.summary();
-                    app.Controls.RunInfoLabel.Text = sprintf('完成 %d 个 | %.3f s', ...
-                        total, app.Performance.lastAnalysis.totalSeconds);
+                    app.Controls.RunInfoLabel.Text = '完成';
                     app.Controls.RunInfoLabel.Tooltip = sprintf('完成：%d 个数据集 | 总耗时 %.3f s；详细阶段耗时见日志和保存结果。', ...
                         total, app.Performance.lastAnalysis.totalSeconds);
                     if strlength(app.LastPlotError) > 0
@@ -808,9 +807,10 @@ classdef LfpApp < handle
             bg.ColumnWidth = {'1x', 100, '2x', 420}; bg.Padding = [0 0 0 0];
             app.Controls.ProgressGauge = uigauge(bg, 'linear', 'Limits', [0 1], 'Value', 0, 'MajorTicks', [], 'MinorTicks', []);
             app.Controls.ProgressGauge.Layout.Row = 1; app.Controls.ProgressGauge.Layout.Column = 1;
-            app.Controls.ProgressLabel = uilabel(bg, 'Text', '进度 0%', 'HorizontalAlignment', 'center');
+            app.Controls.ProgressLabel = uilabel(bg, 'Text', '0%', 'HorizontalAlignment', 'center');
             app.Controls.ProgressLabel.Layout.Row = 1; app.Controls.ProgressLabel.Layout.Column = 2;
-            app.Controls.RunInfoLabel = uilabel(bg, 'Text', '原始数据保留；伪迹默认以 mask/NaN 显示', 'HorizontalAlignment', 'left', 'WordWrap', 'off');
+            app.Controls.RunInfoLabel = uilabel(bg, 'Text', '就绪', 'HorizontalAlignment', 'left', 'WordWrap', 'off', ...
+                'Tooltip', '原始数据保留；伪迹默认以 mask/NaN 显示。');
             app.Controls.RunInfoLabel.Layout.Row = 1; app.Controls.RunInfoLabel.Layout.Column = 3;
             app.Controls.ResultStatusLabel = uilabel(bg, 'Text', '未运行', 'HorizontalAlignment', 'right', 'WordWrap', 'off', ...
                 'Tooltip', '结果状态：未运行。');
