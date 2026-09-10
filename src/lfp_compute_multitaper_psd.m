@@ -40,6 +40,12 @@ windowStarts = make_window_starts(nSamples, windowSamples, options.OverlapFracti
 windowPsd = NaN(numel(frequencyHz), numel(windowStarts), nChannels);
 acceptedWindows = cell(1, nChannels);
 filledSampleCount = zeros(1, nChannels);
+if isfield(data, 'time') && numel(data.time) == nSamples && all(isfinite(data.time))
+    timeVector = double(data.time(:));
+else
+    timeVector = (0:nSamples - 1)' / fs;
+end
+timeGapRejected = false(numel(windowStarts), 1);
 artifactMask = false(nSamples, nChannels);
 if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask') && ...
         isequal(size(data.artifacts.channelMask), size(signal))
@@ -52,6 +58,10 @@ for channelIndex = 1:nChannels
         first = windowStarts(windowIndex); last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
         invalid = ~isfinite(segment) | artifactMask(first:last, channelIndex);
+        if any(abs(diff(timeVector(first:last)) - 1 / fs) > max(1e-9, 1e-3 / fs))
+            timeGapRejected(windowIndex) = true;
+            continue;
+        end
         if options.ExcludeArtifacts && mean(invalid) > options.MaxArtifactFraction, continue; end
         if any(invalid)
             filledSampleCount(channelIndex) = filledSampleCount(channelIndex) + nnz(invalid);
@@ -95,6 +105,7 @@ spectrum.acceptedWindowStarts = acceptedWindows; spectrum.allWindowStarts = wind
 spectrum.windowPsd = windowPsd; spectrum.validWindowCountPerFrequency = sum(isfinite(windowPsd), 2);
 spectrum.frequencyResolutionHz = fs / nfft; spectrum.excludedWindowCount = numel(windowStarts) - spectrum.windowCount;
 spectrum.filledSampleCount = filledSampleCount; spectrum.includesLineNoise = true;
+spectrum.timeGapRejected = timeGapRejected;
 spectrum.taperCount = taperCount; spectrum.dpssEigenvalues = eigenvalues(:)';
 spectrum.timeBandwidthProduct = nw; spectrum.halfBandwidthHz = nw / (windowSamples / fs);
 spectrum.smoothingBandwidthHz = 2 * spectrum.halfBandwidthHz;

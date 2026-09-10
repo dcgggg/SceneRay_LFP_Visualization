@@ -64,6 +64,12 @@ if windowStarts(end) + windowSamples - 1 < nSamples
 end
 windowPsd = NaN(numel(frequencyHz), numel(windowStarts), nChannels);
 filledSampleCount = zeros(1, nChannels);
+if isfield(data, 'time') && numel(data.time) == nSamples && all(isfinite(data.time))
+    timeVector = double(data.time(:));
+else
+    timeVector = (0:nSamples - 1)' / fs;
+end
+timeGapRejected = false(numel(windowStarts), 1);
 
 artifactMask = false(nSamples, nChannels);
 if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask')
@@ -82,6 +88,10 @@ for channelIndex = 1:nChannels
         last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
         invalid = ~isfinite(segment) | artifactMask(first:last, channelIndex);
+        if any(abs(diff(timeVector(first:last)) - 1 / fs) > max(1e-9, 1e-3 / fs))
+            timeGapRejected(windowIndex) = true;
+            continue;
+        end
         artifactFraction = mean(invalid);
         % MaxArtifactFraction is the explicit tolerance for a window. With
         % the default 0, any invalid/artifact sample rejects the window. A
@@ -142,6 +152,7 @@ spectrum.validWindowCountPerFrequency = sum(isfinite(windowPsd), 2);
 spectrum.frequencyResolutionHz = fs / nfft;
 spectrum.excludedWindowCount = numel(windowStarts) - spectrum.windowCount;
 spectrum.filledSampleCount = filledSampleCount;
+spectrum.timeGapRejected = timeGapRejected;
 spectrum.includesLineNoise = true;
 spectrum.parameters = struct('windowSeconds', options.WindowSeconds, ...
     'windowSamples', windowSamples, 'overlapFraction', options.OverlapFraction, ...
