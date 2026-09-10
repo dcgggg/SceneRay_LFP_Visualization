@@ -16,18 +16,6 @@ verifyEqual(testCase, out.spectrum.halfBandwidthHz, 1.75, 'AbsTol', 1e-12);
 verifyEqual(testCase, out.spectrum.parameters.taperWeighting, "equal");
 end
 
-function testTimeFrequencyKeepsArtifactGap(testCase)
-ensure_src_on_path(testCase);
-fs = 1000; t = (0:3999)' / fs; x = sin(2*pi*10*t);
-data = base_data(x, fs); data.artifacts.channelMask = false(size(x));
-data.artifacts.channelMask(1801:2200) = true;
-out = lfp_compute_time_frequency(data, WindowSeconds=0.5, StepSeconds=0.1, ...
-    MaxArtifactFraction=0, Method="welch", FrequencyRangeHz=[1 40]);
-gap = out.timeFrequency.timeSeconds >= 1.8 & out.timeFrequency.timeSeconds <= 2.2;
-verifyTrue(testCase, all(~out.timeFrequency.validWindowMask(gap)));
-verifyTrue(testCase, all(isnan(out.timeFrequency.power(:, gap, 1)), 'all'));
-end
-
 function testKneeModelHasDistinctField(testCase)
 ensure_src_on_path(testCase);
 cfg = lfpDefaultConfig(); cfg.fooof.aperiodicMode = "knee";
@@ -38,6 +26,20 @@ verifyEqual(testCase, result.aperiodicParams.mode, "knee");
 verifyTrue(testCase, isfinite(result.aperiodicParams.knee));
 verifyEqual(testCase, result.fittingPower, result.inputPower);
 verifyFalse(testCase, result.interpolationApplied);
+end
+
+function testBandPowerRunsWithoutSpecparam(testCase)
+ensure_src_on_path(testCase);
+freq = (1:10)';
+psd = ones(numel(freq), 1);
+psdResult = struct('frequencyHz', freq, 'psd', psd, 'channelLabels', "ch1", ...
+    'fs', 1000, 'units', "uV");
+result = computeBandPower(psdResult, [], struct('delta', [1 4], 'highGamma', [65 100]));
+verifyTrue(testCase, result.hasParameterization == false);
+verifyTrue(testCase, result.table.computable(1));
+verifyEqual(testCase, result.table.status(1), "ok");
+verifyFalse(testCase, result.table.computable(2));
+verifyEqual(testCase, result.table.status(2), "outside_psd_range");
 end
 
 function data = base_data(signal, fs)

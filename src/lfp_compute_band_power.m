@@ -27,7 +27,7 @@ if size(totalPsd, 1) ~= numel(frequencyHz)
     error('LFP:InvalidSpectrum', 'PSD rows must match frequencyHz.');
 end
 referenceMask = frequencyHz >= options.ReferenceRangeHz(1) & ...
-    frequencyHz <= min(options.ReferenceRangeHz(2), frequencyHz(end)) & frequencyHz > 0;
+    frequencyHz <= options.ReferenceRangeHz(2) & frequencyHz > 0;
 referencePower = integrate_columns(frequencyHz(referenceMask), totalPsd(referenceMask, :));
 
 hasParameterization = isfield(data, 'spectralParameters') && ...
@@ -56,10 +56,14 @@ relativePower = NaN(rows, 1);
 aperiodicPower = NaN(rows, 1);
 periodicPower = NaN(rows, 1);
 logTotalPower = NaN(rows, 1);
+computable = false(rows, 1);
+status = strings(rows, 1);
 row = 0;
 for bandIndex = 1:nBands
     bandMask = frequencyHz >= bands(bandIndex).rangeHz(1) & ...
-        frequencyHz <= min(bands(bandIndex).rangeHz(2), frequencyHz(end)) & frequencyHz > 0;
+        frequencyHz <= bands(bandIndex).rangeHz(2) & frequencyHz > 0;
+    bandInRange = bands(bandIndex).rangeHz(1) >= frequencyHz(1) && ...
+        bands(bandIndex).rangeHz(2) <= frequencyHz(end);
     for channel = 1:nChannels
         row = row + 1;
         bandName(row) = bands(bandIndex).name;
@@ -67,12 +71,25 @@ for bandIndex = 1:nBands
         channelLabel(row) = get_channel_label(data, channel);
         lowHz(row) = bands(bandIndex).rangeHz(1);
         highHz(row) = bands(bandIndex).rangeHz(2);
-        if nnz(bandMask) >= 2
+        if ~bandInRange
+            status(row) = "outside_psd_range";
+        elseif nnz(bandMask) < 2
+            status(row) = "insufficient_frequency_points";
+        elseif nnz(isfinite(totalPsd(bandMask, channel)) & totalPsd(bandMask, channel) >= 0) < 2
+            status(row) = "invalid_psd";
+        else
             totalPower(row) = integrate_columns(frequencyHz(bandMask), totalPsd(bandMask, channel));
             if isfinite(totalPower(row)) && totalPower(row) > 0
                 logTotalPower(row) = log10(totalPower(row));
+                computable(row) = true;
+                status(row) = "ok";
             end
-            relativePower(row) = totalPower(row) / max(referencePower(channel), eps);
+            if isfinite(referencePower(channel)) && referencePower(channel) > 0
+                relativePower(row) = totalPower(row) / referencePower(channel);
+            else
+                status(row) = "invalid_reference_range";
+                computable(row) = false;
+            end
             if hasParameterization
                 aperiodicPower(row) = integrate_columns(frequencyHz(bandMask), aperiodicPsd(bandMask, channel));
                 periodicPower(row) = integrate_columns(frequencyHz(bandMask), periodicPsd(bandMask, channel));
@@ -83,8 +100,10 @@ end
 
 resultTable = table(channelIndex, channelLabel, bandName, lowHz, highHz, ...
     totalPower, logTotalPower, relativePower, aperiodicPower, periodicPower, ...
+    computable, status, ...
     'VariableNames', {'channelIndex', 'channelLabel', 'band', 'lowHz', 'highHz', ...
-    'totalPower', 'logTotalPower', 'relativePower', 'aperiodicPower', 'periodicPower'});
+    'totalPower', 'logTotalPower', 'relativePower', 'aperiodicPower', 'periodicPower', ...
+    'computable', 'status'});
 data.bandPower = struct('table', resultTable, 'bands', bands, ...
     'referenceRangeHz', options.ReferenceRangeHz, ...
     'referencePower', referencePower, 'hasParameterization', hasParameterization, ...
