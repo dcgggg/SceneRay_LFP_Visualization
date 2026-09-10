@@ -802,8 +802,10 @@ classdef LfpApp < handle
             uilabel(rawControls, 'Text', '选择数据集和通道；红色区域为伪迹标记', 'WordWrap', 'on');
             app.Controls.RawSaveFigure = uibutton(rawControls, 'Text', '保存图像', 'ButtonPushedFcn', @(s,e)app.onSaveView("raw",e));
             app.Controls.RawSaveData = uibutton(rawControls, 'Text', '保存数据', 'ButtonPushedFcn', @(s,e)app.onSaveViewData("raw",e));
-            app.Controls.RawAxes = uiaxes(g); app.Controls.RawAxes.Layout.Row=2; title(app.Controls.RawAxes, 'Raw signal'); grid(app.Controls.RawAxes, 'on');
-            app.Controls.CleanAxes = uiaxes(g); app.Controls.CleanAxes.Layout.Row=3; title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
+            app.Controls.RawPlotPanel = uipanel(g, 'BorderType', 'none'); app.Controls.RawPlotPanel.Layout.Row=2;
+            app.Controls.RawAxes = uiaxes(app.Controls.RawPlotPanel); app.Controls.RawAxes.Position=[10 10 700 420]; title(app.Controls.RawAxes, 'Raw signal'); grid(app.Controls.RawAxes, 'on');
+            app.Controls.CleanPlotPanel = uipanel(g, 'BorderType', 'none'); app.Controls.CleanPlotPanel.Layout.Row=3;
+            app.Controls.CleanAxes = uiaxes(app.Controls.CleanPlotPanel); app.Controls.CleanAxes.Position=[10 10 700 420]; title(app.Controls.CleanAxes, 'Clean/display (NaN excluded)'); grid(app.Controls.CleanAxes, 'on');
             app.Controls.ArtifactTable = uitable(g, 'ColumnName', {'artifactType','startSample','endSample','startTime','endTime','channel','score','threshold','method'}); app.Controls.ArtifactTable.Layout.Row=4;
 
             psdTab = uitab(tabs, 'Title', 'PSD'); g = uigridlayout(psdTab, [3 1]); g.RowHeight = {36, '1x', 70};
@@ -1263,10 +1265,16 @@ classdef LfpApp < handle
         function renderRaw(app)
             if isempty(fieldnames(app.Data)), return; end
             datasetIndices = app.selectedDatasetIndices();
-            if numel(datasetIndices) > 1 && isfield(app.Controls, 'RawOverlayMode') && string(app.Controls.RawOverlayMode.Value) == "叠加"
-                app.renderRawOverlay(datasetIndices);
-                return;
+            if numel(datasetIndices) > 1 && isfield(app.Controls, 'RawOverlayMode')
+                if string(app.Controls.RawOverlayMode.Value) == "叠加"
+                    app.renderRawOverlay(datasetIndices);
+                    return;
+                elseif string(app.Controls.RawOverlayMode.Value) == "单独显示"
+                    app.renderRawSubplots(datasetIndices);
+                    return;
+                end
             end
+            app.ensureSingleRawAxes();
             d=app.Data; channels=app.selectedChannels(); if isempty(channels), return; end
             r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value];
             if isfield(d, 'time') && numel(d.time) == size(d.signal, 1) && all(isfinite(d.time)) && all(diff(d.time) > 0)
@@ -1294,6 +1302,7 @@ classdef LfpApp < handle
 
         function renderRawOverlay(app, datasetIndices)
             if isempty(datasetIndices), return; end
+            app.ensureSingleRawAxes();
             currentLabels=string(app.Data.channelLabels(:)); channel=app.channelIndexFromControl(app.Controls.RawChannelDropDown,currentLabels);
             r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value]; rawSeries=cell(numel(datasetIndices),1); cleanSeries=cell(numel(datasetIndices),1); timeSeries=cell(numel(datasetIndices),1); names=strings(numel(datasetIndices),1); allValues=[];
             for k=1:numel(datasetIndices)
@@ -1318,6 +1327,51 @@ classdef LfpApp < handle
                 ax.YLim=limits; xlabel(ax,'Time (s)'); ylabel(ax,"Signal ("+string(app.Data.units)+")"); grid(ax,'on'); legend(ax,'Location','best','Interpreter','none');
             end
             title(app.Controls.RawAxes,'Raw overlay | selected datasets','Interpreter','none'); title(app.Controls.CleanAxes,'Clean overlay | artifact samples = NaN','Interpreter','none'); app.updateArtifactTable();
+        end
+
+        function renderRawSubplots(app, datasetIndices)
+            if isempty(datasetIndices), return; end
+            currentLabels=string(app.Data.channelLabels(:)); channel=app.channelIndexFromControl(app.Controls.RawChannelDropDown,currentLabels);
+            r=[app.Controls.DisplayStart.Value app.Controls.DisplayEnd.Value]; rawSeries=cell(numel(datasetIndices),1); cleanSeries=cell(numel(datasetIndices),1); timeSeries=cell(numel(datasetIndices),1); names=strings(numel(datasetIndices),1); allValues=[];
+            for k=1:numel(datasetIndices)
+                entry=app.Datasets(datasetIndices(k)); names(k)=entry.fileName; idx=app.indicesForDisplay(entry,r); if isempty(idx), continue; end
+                channelIndex=min(channel,size(entry.signal,2)); timeSeries{k}=entry.time(idx); rawSeries{k}=entry.signal(idx,channelIndex); cleanSeries{k}=rawSeries{k};
+                results=entry.analysisResults;
+                if isfield(results,'artifactResult') && isstruct(results.artifactResult) && isfield(results.artifactResult,'channelMask') && size(results.artifactResult.channelMask,1)>=max(idx) && size(results.artifactResult.channelMask,2)>=channelIndex
+                    mask=results.artifactResult.channelMask(idx,channelIndex); cleanSeries{k}(mask)=NaN;
+                end
+                allValues=[allValues; rawSeries{k}(isfinite(rawSeries{k}))]; %#ok<AGROW>
+            end
+            if isempty(allValues), return; end
+            limits=app.finiteLimits(allValues); app.ensureRawSubplotLayouts(numel(datasetIndices));
+            rawAxes=findall(app.Controls.RawPlotPanel,'Type','uiaxes'); rawAxes=flipud(rawAxes(:)); cleanAxes=findall(app.Controls.CleanPlotPanel,'Type','uiaxes'); cleanAxes=flipud(cleanAxes(:));
+            for k=1:numel(datasetIndices)
+                if isempty(timeSeries{k}), continue; end
+                cla(rawAxes(k)); plot(rawAxes(k),timeSeries{k},rawSeries{k},'Color',[0.1 0.25 0.85],'LineWidth',0.7); rawAxes(k).YLim=limits; xlabel(rawAxes(k),'Time (s)'); ylabel(rawAxes(k),"Signal ("+string(app.Data.units)+")"); title(rawAxes(k),"Raw | "+names(k),'Interpreter','none'); grid(rawAxes(k),'on');
+                cla(cleanAxes(k)); plot(cleanAxes(k),timeSeries{k},cleanSeries{k},'Color',[0.1 0.55 0.2],'LineWidth',0.7); cleanAxes(k).YLim=limits; xlabel(cleanAxes(k),'Time (s)'); ylabel(cleanAxes(k),"Signal ("+string(app.Data.units)+")"); title(cleanAxes(k),"Clean | "+names(k)+" (artifact samples = NaN)",'Interpreter','none'); grid(cleanAxes(k),'on');
+            end
+            app.Controls.RawAxes=rawAxes(1); app.Controls.CleanAxes=cleanAxes(1); app.updateArtifactTable();
+        end
+
+        function ensureSingleRawAxes(app)
+            if ~isfield(app.Controls,'RawPlotPanel') || ~isgraphics(app.Controls.RawPlotPanel) || ~isfield(app.Controls,'CleanPlotPanel') || ~isgraphics(app.Controls.CleanPlotPanel), return; end
+            rawAxes=findall(app.Controls.RawPlotPanel,'Type','uiaxes'); cleanAxes=findall(app.Controls.CleanPlotPanel,'Type','uiaxes');
+            if numel(rawAxes)==1 && numel(cleanAxes)==1
+                app.Controls.RawAxes=rawAxes(1); app.Controls.CleanAxes=cleanAxes(1); return;
+            end
+            delete(app.Controls.RawPlotPanel.Children); delete(app.Controls.CleanPlotPanel.Children);
+            app.Controls.RawAxes=uiaxes(app.Controls.RawPlotPanel); app.Controls.RawAxes.Position=[10 10 700 420]; grid(app.Controls.RawAxes,'on');
+            app.Controls.CleanAxes=uiaxes(app.Controls.CleanPlotPanel); app.Controls.CleanAxes.Position=[10 10 700 420]; grid(app.Controls.CleanAxes,'on');
+        end
+
+        function ensureRawSubplotLayouts(app, nDatasets)
+            nRows=max(1,ceil(nDatasets/2));
+            delete(app.Controls.RawPlotPanel.Children); delete(app.Controls.CleanPlotPanel.Children);
+            rawLayout=uigridlayout(app.Controls.RawPlotPanel,[nRows 2]); rawLayout.RowHeight=repmat({'1x'},1,nRows); rawLayout.ColumnWidth={'1x','1x'}; rawLayout.Padding=[4 4 4 4];
+            cleanLayout=uigridlayout(app.Controls.CleanPlotPanel,[nRows 2]); cleanLayout.RowHeight=repmat({'1x'},1,nRows); cleanLayout.ColumnWidth={'1x','1x'}; cleanLayout.Padding=[4 4 4 4];
+            for k=1:nDatasets
+                uiaxes(rawLayout); uiaxes(cleanLayout);
+            end
         end
 
         function idx = indicesForDisplay(app, entry, range)
