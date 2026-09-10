@@ -12,6 +12,7 @@
 8. **Export** — tables, MAT files, figures, and a processing log with parameters and software information.
 9. **GUI** — the MATLAB-native `LfpApp`/`launchLfpApp` layer. It owns import confirmation, parameter controls, run snapshots, cache/expiry status, result tabs and save actions, while calling the same public analysis functions as scripts.
 10. **Dataset manager** — the GUI keeps each CSV as an independent `Datasets(k)` record with canonical arrays and an `analysisResults` struct. Checkbox selection drives sequential per-dataset runs; files are never concatenated for PSD or parameterization.
+11. **Task manager** — `LfpAnalysisTaskManager` owns stage progress, elapsed-time records and cooperative cancellation. Algorithms receive temporary callbacks through `cfg`; callbacks are stripped before results are persisted.
 
 ## Dependency policy
 
@@ -32,3 +33,5 @@ The GUI takes a run snapshot containing the selected channels, analysis range, m
 The raw signal remains in the data model and is never overwritten by a derived signal.
 
 The GUI `AppState` records selected dataset indices, selected channels, the active analysis stage, current result handles and plot settings. Dataset/channel selectors in the Raw, PSD, time-frequency and specparam tabs update the active record and redraw only the corresponding result views where possible.
+
+Result tabs use lazy rendering. Numeric cache validity follows Data → Artifact → PSD → specparam → Band power, while plot-dirty state is separate. Raw plotting may use `lfp_downsample_envelope` for display only; this cannot alter `data.signal`, PSD input, artifact masks, or exported canonical arrays.

@@ -25,6 +25,17 @@ end
 method = get_field(psdCfg, 'method', "welch");
 detrendMode = get_field(psdCfg, 'detrend', "constant");
 multitaper = get_field(psdCfg, 'multitaper', struct());
+progress = get_field(psdCfg, 'progressCallback', @(fraction, message)[]);
+cancel = get_field(psdCfg, 'cancellationCheck', @()[]);
+if ~isa(progress, 'function_handle'), progress = @(fraction, message)[]; end
+if ~isa(cancel, 'function_handle'), cancel = @()[]; end
+tfCfg = get_field(psdCfg, 'timeFrequency', struct());
+computeTimeFrequency = isstruct(tfCfg) && get_field(tfCfg, 'enabled', false);
+if computeTimeFrequency
+    psdProgress = @(fraction, message)progress(0.65 * fraction, message);
+else
+    psdProgress = progress;
+end
 resultData = lfp_compute_psd(cleanData, ...
     WindowSeconds=psdCfg.windowLengthSec, ...
     OverlapFraction=psdCfg.overlapFraction, ...
@@ -36,13 +47,13 @@ resultData = lfp_compute_psd(cleanData, ...
     TimeBandwidthProduct=get_field(multitaper, 'timeBandwidthProduct', 3.5), ...
     TaperCount=get_field(multitaper, 'taperCount', 0), ...
     TaperWeighting=string(get_field(multitaper, 'weighting', "equal")), ...
-    FrequencyRangeHz=psdCfg.frequencyRange);
+    FrequencyRangeHz=psdCfg.frequencyRange, ...
+    ProgressCallback=psdProgress, CancellationCheck=cancel);
 psdResult = resultData.spectrum;
 % Expose the updated history so a GUI/script can persist the complete audit
 % trail without needing to use the legacy DATA-returning entry point.
 psdResult.processingHistory = resultData.processingHistory;
-tfCfg = get_field(psdCfg, 'timeFrequency', struct());
-if isstruct(tfCfg) && get_field(tfCfg, 'enabled', false)
+if computeTimeFrequency
     tfMethod = string(method);
     if get_field(tfCfg, 'reusePsdParameters', true)
         tfWindow = psdCfg.windowLengthSec;
@@ -65,9 +76,12 @@ if isstruct(tfCfg) && get_field(tfCfg, 'enabled', false)
         FrequencyRangeHz=tfRange, MaxArtifactFraction=get_field(tfCfg, 'maxArtifactFraction', psdCfg.maxArtifactFraction), ...
         ExcludeArtifacts=psdCfg.excludeArtifacts, Method=tfMethod, ...
         TimeBandwidthProduct=tfNW, TaperCount=tfK, ...
-        PowerScale=string(get_field(tfCfg, 'powerScale', "linear")));
+        PowerScale=string(get_field(tfCfg, 'powerScale', "linear")), ...
+        ProgressCallback=@(fraction, message)progress(0.65 + 0.35 * fraction, message), ...
+        CancellationCheck=cancel);
     psdResult.timeFrequency = tfData.timeFrequency;
 end
+progress(1, "PSD and time-frequency calculation complete");
 end
 
 function value = get_field(s, name, defaultValue)

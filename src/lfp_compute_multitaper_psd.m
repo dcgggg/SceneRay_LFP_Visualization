@@ -18,9 +18,14 @@ arguments
     options.TaperCount (1,1) double {mustBeInteger, mustBeNonnegative} = 0
     options.TaperWeighting (1,1) string {mustBeMember(options.TaperWeighting, "equal")} = "equal"
     options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 40]
+    options.ProgressCallback = []
+    options.CancellationCheck = []
 end
 
 validate_data(data);
+progress = callback_or_default(options.ProgressCallback, @(fraction, message)[]);
+cancel = callback_or_default(options.CancellationCheck, @()[]);
+cancel(); progress(0, "Preparing multitaper PSD windows");
 signal = double(data.signal);
 [nSamples, nChannels] = size(signal);
 fs = double(data.fs);
@@ -53,8 +58,15 @@ if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask') && ...
 end
 
 for channelIndex = 1:nChannels
+    cancel();
     accepted = false(numel(windowStarts), 1);
     for windowIndex = 1:numel(windowStarts)
+        if mod(windowIndex - 1, 100) == 0
+            cancel();
+            localFraction = (windowIndex - 1) / max(numel(windowStarts), 1);
+            progress(((channelIndex - 1) + localFraction) / max(nChannels, 1), ...
+                sprintf('Multitaper PSD: channel %d/%d', channelIndex, nChannels));
+        end
         first = windowStarts(windowIndex); last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
         invalid = ~isfinite(segment) | artifactMask(first:last, channelIndex);
@@ -120,6 +132,7 @@ data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
     'notes', "Artifact-aware DPSS multitaper PSD; equal taper weights; 40-Hz harmonics retained.");
 data.processingHistory(end + 1) = entry;
+progress(1, "Multitaper PSD complete");
 end
 
 function starts = make_window_starts(nSamples, windowSamples, overlap)
@@ -156,4 +169,8 @@ function labels = get_channel_labels(data, nChannels)
 if isfield(data, 'channelLabels') && numel(data.channelLabels) == nChannels, labels = string(data.channelLabels(:))';
 elseif isfield(data, 'channelNames') && numel(data.channelNames) == nChannels, labels = string(data.channelNames(:))';
 else, labels = "channel_" + string(1:nChannels); end
+end
+
+function callback = callback_or_default(candidate, defaultCallback)
+if isa(candidate, 'function_handle'), callback = candidate; else, callback = defaultCallback; end
 end

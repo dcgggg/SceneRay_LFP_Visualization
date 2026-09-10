@@ -8,7 +8,7 @@ ensure_src_on_path(testCase);
 cfg = lfpDefaultConfig();
 verifyEqual(testCase, cfg.artifact.method, "native");
 verifyFalse(testCase, cfg.artifact.lineNoiseDetection);
-verifyEqual(testCase, cfg.plot.maxPlotSeconds, Inf);
+verifyEqual(testCase, cfg.plot.maxPlotSeconds, 60);
 verifyEqual(testCase, cfg.psd.maxArtifactFraction, 0);
 verifyEqual(testCase, cfg.psd.frequencyRange, [1 40]);
 verifyEqual(testCase, cfg.fooof.frequencyRange, [1 35]);

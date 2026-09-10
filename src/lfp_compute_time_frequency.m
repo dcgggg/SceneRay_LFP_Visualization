@@ -17,6 +17,8 @@ arguments
     options.TimeBandwidthProduct (1,1) double {mustBeFinite, mustBeGreaterThan(options.TimeBandwidthProduct, 0.5)} = 3.5
     options.TaperCount (1,1) double {mustBeInteger, mustBeNonnegative} = 0
     options.PowerScale (1,1) string {mustBeMember(options.PowerScale, ["linear" "log10" "dB"])} = "linear"
+    options.ProgressCallback = []
+    options.CancellationCheck = []
 end
 
 if ~isfield(data, 'signal') || ~isfield(data, 'fs') || ~isfield(data, 'processingHistory')
@@ -41,6 +43,9 @@ else
     normalization = fs * sum(window .^ 2);
     taperCount = 1; nw = NaN; taperEigenvalues = NaN;
 end
+progress = callback_or_default(options.ProgressCallback, @(fraction, message)[]);
+cancel = callback_or_default(options.CancellationCheck, @()[]);
+cancel(); progress(0, "Preparing time-frequency windows");
 frequencyHz = (0:floor(nfft / 2))' * fs / nfft;
 frequencyMask = frequencyHz >= options.FrequencyRangeHz(1) & ...
     frequencyHz <= min(options.FrequencyRangeHz(2), frequencyHz(end));
@@ -67,6 +72,12 @@ if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask') && ...
 end
 for channelIndex = 1:nChannels
     for windowIndex = 1:numel(starts)
+        if mod(windowIndex - 1, 50) == 0
+            cancel();
+            localFraction = (windowIndex - 1) / max(numel(starts), 1);
+            progress(((channelIndex - 1) + localFraction) / max(nChannels, 1), ...
+                sprintf('Time-frequency: channel %d/%d', channelIndex, nChannels));
+        end
         first = starts(windowIndex);
         last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
@@ -133,6 +144,7 @@ entry = struct('operation', "time_frequency", 'parameters', struct( ...
     'method', options.Method, 'taperCount', taperCount, 'timeBandwidthProduct', nw), ...
     'notes', "Invalid or discontinuous windows set to NaN; no line-frequency notch applied.");
 data.processingHistory(end + 1) = entry;
+progress(1, "Time-frequency calculation complete");
 end
 
 function values = hann_vector(n)
@@ -154,4 +166,8 @@ else
     index = (1:numel(values))';
     values(~finite) = interp1(index(finite), values(finite), index(~finite), 'linear', 'extrap');
 end
+end
+
+function callback = callback_or_default(candidate, defaultCallback)
+if isa(candidate, 'function_handle'), callback = candidate; else, callback = defaultCallback; end
 end

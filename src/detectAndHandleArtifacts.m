@@ -15,6 +15,9 @@ arguments
 end
 
 validate_input(data, artifactCfg);
+runtime = runtime_callbacks(artifactCfg);
+runtime.cancel();
+runtime.progress(0, "Preparing artifact detection");
 signal = double(data.signal);
 [nSamples, nChannels] = size(signal);
 fs = double(data.fs);
@@ -30,6 +33,7 @@ methodUsed = methodRequested;
 warnings = strings(0, 1);
 
 if methodRequested == "fieldtrip"
+    runtime.cancel();
     [fieldtripMask, fieldtripEvents, fieldtripWarnings, fieldtripAvailable] = ...
         run_fieldtrip_backend(data, artifactCfg);
     warnings = [warnings; fieldtripWarnings]; %#ok<AGROW>
@@ -48,7 +52,7 @@ elseif methodRequested ~= "native"
 end
 
 skipNativeJump = methodRequested == "fieldtrip" && isfield(reasonMasks, 'fieldtrip');
-[nativeMask, nativeEvents] = run_native_backend(signal, fs, artifactCfg, nativeEvents, skipNativeJump);
+[nativeMask, nativeEvents] = run_native_backend(signal, fs, artifactCfg, nativeEvents, skipNativeJump, runtime);
 if methodRequested == "fieldtrip" && isfield(reasonMasks, 'fieldtrip')
     combinedMask = nativeMask | reasonMasks.fieldtrip;
 else
@@ -77,18 +81,20 @@ artifactResult.events = events;
 artifactResult.badChannels = find_bad_channels(combinedMask, signal, artifactCfg);
 artifactResult.method = methodUsed;
 artifactResult.methodRequested = methodRequested;
-artifactResult.parameters = artifactCfg;
+storedCfg = strip_runtime_fields(artifactCfg);
+artifactResult.parameters = storedCfg;
 artifactResult.summary = summarize_events(events, artifactResult.badChannels, nSamples, nChannels, fs, combinedMask);
 artifactResult.retainedDuration = nnz(~globalMask) / fs;
 artifactResult.rejectedDuration = nnz(globalMask) / fs;
 artifactResult.rejectedPercentage = 100 * nnz(globalMask) / max(nSamples, 1);
 artifactResult.warnings = warnings;
-artifactResult.processingHistory = append_history(data, methodUsed, artifactCfg, warnings);
+artifactResult.processingHistory = append_history(data, methodUsed, storedCfg, warnings);
 
 cleanData = data;
 cleanData.cleanedSignal = cleanedSignal;
 cleanData.artifacts = artifactResult;
 cleanData.processingHistory = artifactResult.processingHistory;
+runtime.progress(1, "Artifact detection complete");
 end
 
 function validate_input(data, cfg)
@@ -151,11 +157,14 @@ catch exception
 end
 end
 
-function [mask, events] = run_native_backend(signal, fs, cfg, events, skipJump)
+function [mask, events] = run_native_backend(signal, fs, cfg, events, skipJump, runtime)
 [nSamples, nChannels] = size(signal);
 if nargin < 5, skipJump = false; end
 mask = false(nSamples, nChannels);
 for channel = 1:nChannels
+    runtime.cancel();
+    runtime.progress((channel - 1) / max(nChannels, 1), ...
+        sprintf('Detecting artifacts: channel %d/%d', channel, nChannels));
     x = signal(:, channel);
     finite = isfinite(x);
     values = x(finite);
@@ -195,7 +204,7 @@ for channel = 1:nChannels
         get_field(cfg, 'highFrequencyZ', 8), "native.high_frequency_envelope");
 
     if get_field(cfg, 'strictMode', false)
-        strictBurst = detect_strict_burst(x, fs, cfg);
+        strictBurst = detect_strict_burst(x, fs, cfg, runtime, channel, nChannels);
         [mask, events] = merge_reason(mask, events, strictBurst, channel, "strict_burst", ...
             get_field(cfg, 'strictHighFrequencyZ', 4), "native.strict_window_features");
     end
@@ -343,7 +352,7 @@ if sigma > 0
 end
 end
 
-function mask = detect_strict_burst(x, fs, cfg)
+function mask = detect_strict_burst(x, fs, cfg, runtime, channel, nChannels)
 % Detect sustained abnormal windows using high-frequency energy, derivative
 % energy, and local range. Complete short windows are marked so a burst with
 % moderate amplitude is not reduced to a few missed samples.
@@ -370,6 +379,12 @@ nfft = 2 ^ nextpow2(windowSamples);
 frequency = (0:floor(nfft/2))' * fs / nfft;
 highFrequencyBins = frequency >= cutoffHz & frequency <= fs/2;
 for index = 1:numel(starts)
+    if mod(index - 1, 100) == 0
+        runtime.cancel();
+        channelFraction = (index - 1) / max(numel(starts), 1);
+        runtime.progress(((channel - 1) + channelFraction) / max(nChannels, 1), ...
+            sprintf('Strict burst detection: channel %d/%d', channel, nChannels));
+    end
     first = starts(index); last = first + windowSamples - 1;
     if nnz(finite(first:last)) < 0.8 * windowSamples
         continue;
@@ -512,6 +527,18 @@ if isfield(s, name) && ~isempty(s.(name))
 else
     value = defaultValue;
 end
+end
+
+function runtime = runtime_callbacks(cfg)
+runtime.progress = get_field(cfg, 'progressCallback', @(fraction, message)[]); %#ok<NASGU>
+runtime.cancel = get_field(cfg, 'cancellationCheck', @()[]);
+if ~isa(runtime.progress, 'function_handle'), runtime.progress = @(fraction, message)[]; end
+if ~isa(runtime.cancel, 'function_handle'), runtime.cancel = @()[]; end
+end
+
+function cfg = strip_runtime_fields(cfg)
+fields = intersect(fieldnames(cfg), {'progressCallback', 'cancellationCheck'});
+if ~isempty(fields), cfg = rmfield(cfg, fields); end
 end
 
 function sigma = robust_scale(values)

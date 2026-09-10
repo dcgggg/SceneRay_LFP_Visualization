@@ -2,7 +2,7 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
-当前本地开发版本：**v0.8.0**。本阶段在 v0.7.0 基础上增加多 CSV 数据集管理、独立时频页、PSD 显示模式、Gaussian 峰分解和分组频段比较。
+当前本地开发版本：**v0.8.0**。本阶段在 v0.7.0 基础上增加多 CSV 数据集管理、独立时频页、PSD 显示模式、Gaussian 峰分解、分组频段比较，以及大文件导入和 GUI 响应优化。
 
 ## 目标
 
@@ -83,6 +83,8 @@ GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分�
 
 “分析时间范围”和“波形显示范围”彼此独立。修改颜色、坐标或显示范围后使用“重新绘图”；修改 PSD、FOOOF、频段或伪迹参数会标记结果过期，必须重新运行。GUI 中的“伪迹重建”暂时禁用，默认只保存原始数据、mask、事件和 NaN 显示副本。没有有效时间列或时间间隔不规则时，GUI 会阻止需要均匀采样的 PSD 分析，并提示修正导入设置。
 
+导入预览只读取有限行；通用数值 CSV 使用 `readmatrix`，SceneRay 多块文件使用一次流式解析。运行分析时会显示当前阶段、进度和耗时，取消按钮会在原生算法的下一个通道/窗口检查点安全停止。结果页采用延迟绘图，只有打开的标签页会绘制。仅改变显示参数不会重算 PSD；改变上游计算参数时，缓存会沿 Data → Artifact → PSD → specparam → Band power 依赖链失效。
+
 GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出标准 `signal_data.csv`、`psd.csv`、`time_frequency.mat`、band-power/processing-history CSV 和 PNG 总览图。结果页提供保存图像（PNG/SVG/FIG）和保存当前视图数据（MAT）按钮，保存内容包含数据集、通道、参数快照和时间戳。自动保存选项使用带时间戳的子目录，不覆盖已有结果；完整 MAT 会同时保留导入映射、单位、PSD/specparam/时频参数与 processingHistory。
 
 v0.6.1 还包含以下 GUI 稳定性修复：CSV 预览、信息栏、伪迹事件表和频段结果表会将字符串/分类值转换为 `uitable` 可显示的字符值，但不会修改原始导入数据或分析结果表；确认导入时会复用已经完成预览的 CSV 内容，SceneRay 数据行解析也采用预分配方式以减少大文件导入耗时。
@@ -123,7 +125,7 @@ results = runtests('tests');
 assert(all([results.Passed]));
 ```
 
-v0.6.1 在 MATLAB R2024a 环境中通过全部 **43/43** 项自动化测试。测试运行时可能出现用户本机 FieldTrip 路径优先级提示；这些提示不属于项目测试失败。
+当前开发版在 MATLAB R2024a 环境中运行完整自动化测试；最终通过数量见本次交付报告。测试运行时可能出现用户本机 FieldTrip 路径优先级提示；这些提示不属于项目测试失败。
 
 也可以检查入口：
 
@@ -152,6 +154,8 @@ docs/      架构、数据格式和算法说明
 
 ## 交互式绘图
 
-绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。波形默认显示整个记录（`cfg.plot.maxPlotSeconds = Inf`）；长记录可改成具体秒数。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
+绘图函数默认创建可交互的 MATLAB 图窗（`cfg.plot.visible = "on"`），可以直接缩放、平移和读取数据光标。GUI 波形默认显示 60 秒（`cfg.plot.maxPlotSeconds = 60`），可改为其他秒数或 `Inf`。超过 `cfg.plot.maxDisplayPoints` 的 Raw/Clean 波形只在显示层转换为峰谷包络，短尖峰仍可见；分析和导出始终使用完整数组。`plotArtifactComparison` 会将每个通道按 `Raw`、`Clean/display` 两个面板纵向排列；Clean 面板中的伪影样本显示为 `NaN`，不会伪造连续曲线。批处理示例使用 `KeepFiguresOpen=true` 保留图窗；如只需要保存图片，可改为 `false`。
+
+性能测量、限制和可复现基准见 [docs/performance.md](docs/performance.md)。
 
 保存图片默认使用较大的画布（1600×1100 像素）和 300 DPI，可在 `cfg.plot.figurePosition`、`cfg.plot.exportResolution` 中调整。

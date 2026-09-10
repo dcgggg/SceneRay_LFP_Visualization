@@ -61,10 +61,19 @@ end
 
 nChannels = size(power, 2);
 modelResult = repmat(empty_result(), 1, nChannels);
+progress = get_field(fooofCfg, 'progressCallback', @(fraction, message)[]);
+cancel = get_field(fooofCfg, 'cancellationCheck', @()[]);
+if ~isa(progress, 'function_handle'), progress = @(fraction, message)[]; end
+if ~isa(cancel, 'function_handle'), cancel = @()[]; end
+storedCfg = strip_runtime_fields(fooofCfg);
 for channel = 1:nChannels
+    cancel();
+    progress((channel - 1) / max(nChannels, 1), ...
+        sprintf('specparam fitting: channel %d/%d', channel, nChannels));
     modelResult(channel) = fit_channel(freq, power(:, channel), fitPower(:, channel), ...
-        fooofCfg, fitRange, frequencyResolution, lineNoise);
+        storedCfg, fitRange, frequencyResolution, lineNoise);
 end
+progress(1, "specparam fitting complete");
 end
 
 function result = fit_channel(freq, inputPower, fittingPower, cfg, fitRange, frequencyResolution, lineNoise)
@@ -339,6 +348,11 @@ end
 
 function value = get_field(s, name, defaultValue)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = defaultValue; end
+end
+
+function cfg = strip_runtime_fields(cfg)
+fields = intersect(fieldnames(cfg), {'progressCallback', 'cancellationCheck'});
+if ~isempty(fields), cfg = rmfield(cfg, fields); end
 end
 
 function value = robust_scale(values)

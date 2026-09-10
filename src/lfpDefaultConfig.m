@@ -88,7 +88,8 @@ cfg.plot.visible = "on";
 cfg.plot.frequencyScale = "linear";
 cfg.plot.powerScale = "log10";
 cfg.plot.frequencyRange = [1 40];
-cfg.plot.maxPlotSeconds = Inf;
+cfg.plot.maxPlotSeconds = 60;
+cfg.plot.maxDisplayPoints = 12000;
 cfg.plot.channelIndex = [];
 cfg.plot.parent = [];
 cfg.plot.showArtifactLabels = true;
@@ -160,6 +161,8 @@ metadata(end+1) = item("bands", cfg.bands, "struct", "Hz", [], [], ...
     "Named frequency intervals used for total, relative, aperiodic and periodic power.", "Band power");
 metadata(end+1) = item("plot.frequencyScale", cfg.plot.frequencyScale, "string", "", [], ...
     ["linear" "log"], "Frequency-axis scale for model plots.", "Plot");
+metadata(end+1) = item("plot.maxDisplayPoints", cfg.plot.maxDisplayPoints, "double", "points", [2 Inf], [], ...
+    "Display-only min/max envelope limit; scientific analysis always uses the full selected data.", "Plot");
 end
 
 function value = item(name, defaultValue, dataType, unit, validRange, choices, description, guiGroup)

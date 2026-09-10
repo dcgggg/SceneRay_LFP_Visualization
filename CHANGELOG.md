@@ -11,6 +11,10 @@
 - Added native fixed/knee specparam parameterization and removed fitting-time interpolation.
 - Updated GUI labels to specparam（原FOOOF）, added method/multitaper/time-frequency controls, replaced band heatmap with dot facets, and removed the legacy 摘要 tab.
 - Added import metadata for time source/unit conversion and a confirmation dialog for sampling-rate disagreement.
+- Added staged progress, cooperative cancellation, per-stage timing, dependency-aware cache reuse, lazy result-tab rendering, and actionable stage-aware errors.
+- Added a display-only min/max envelope for long raw/clean traces and changed the default waveform view to 60 seconds; full arrays remain unchanged for analysis and export.
+- Reflowed fixed-width control grids, fixed overlapping band controls, and centralized GUI sizing/font choices.
+- Added reproducible small/medium/opt-in-large performance benchmarks and runtime engineering regression tests.
 
 ## [0.6.1] - 2026-09-07
 

@@ -20,9 +20,14 @@ arguments
     options.TaperCount (1,1) double {mustBeInteger, mustBeNonnegative} = 0
     options.TaperWeighting (1,1) string {mustBeMember(options.TaperWeighting, "equal")} = "equal"
     options.FrequencyRangeHz (1,2) double {mustBeNonnegative} = [1 40]
+    options.ProgressCallback = []
+    options.CancellationCheck = []
 end
 
 validate_data(data);
+progress = callback_or_default(options.ProgressCallback, @(fraction, message)[]);
+cancel = callback_or_default(options.CancellationCheck, @()[]);
+cancel(); progress(0, "Preparing PSD windows");
 if options.Method == "multitaper"
     data = lfp_compute_multitaper_psd(data, ...
         WindowSeconds=options.WindowSeconds, ...
@@ -33,7 +38,8 @@ if options.Method == "multitaper"
         DetrendMode=resolve_detrend_mode(options.DetrendMode, options.DetrendConstant), ...
         TimeBandwidthProduct=options.TimeBandwidthProduct, ...
         TaperCount=options.TaperCount, TaperWeighting=options.TaperWeighting, ...
-        FrequencyRangeHz=options.FrequencyRangeHz);
+        FrequencyRangeHz=options.FrequencyRangeHz, ...
+        ProgressCallback=progress, CancellationCheck=cancel);
     return;
 end
 signal = double(data.signal);
@@ -80,10 +86,19 @@ if isfield(data, 'artifacts') && isfield(data.artifacts, 'channelMask')
 end
 
 for channelIndex = 1:nChannels
+    cancel();
+    progress((channelIndex - 1) / max(nChannels, 1), ...
+        sprintf('Welch PSD: channel %d/%d', channelIndex, nChannels));
     accumulated = zeros(numel(frequencyHz), 1);
     accepted = false(numel(windowStarts), 1);
     count = 0;
     for windowIndex = 1:numel(windowStarts)
+        if mod(windowIndex - 1, 100) == 0
+            cancel();
+            localFraction = (windowIndex - 1) / max(numel(windowStarts), 1);
+            progress(((channelIndex - 1) + localFraction) / max(nChannels, 1), ...
+                sprintf('Welch PSD: channel %d/%d', channelIndex, nChannels));
+        end
         first = windowStarts(windowIndex);
         last = first + windowSamples - 1;
         segment = signal(first:last, channelIndex);
@@ -165,6 +180,7 @@ data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
     'notes', "Manual Welch PSD from raw signal; artifact-heavy windows excluded; 40-Hz harmonics retained.");
 data.processingHistory(end + 1) = entry;
+progress(1, "Welch PSD complete");
 end
 
 function validate_data(data)
@@ -219,4 +235,8 @@ elseif isfield(data, 'channelNames') && numel(data.channelNames) == nChannels
 else
     labels = "channel_" + string(1:nChannels);
 end
+end
+
+function callback = callback_or_default(candidate, defaultCallback)
+if isa(candidate, 'function_handle'), callback = candidate; else, callback = defaultCallback; end
 end
