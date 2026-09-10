@@ -44,8 +44,9 @@ psdResult = struct('frequencyHz', frequencyHz, 'psd', psd, 'units', "uV", 'fs', 
 model = struct('aperiodicFit', 0.5*ones(40,1), 'periodicFit', 0.5*ones(40,1));
 result = computeBandPower(psdResult, model, cfg.bands);
 verifyEqual(testCase, result.table.band(1), "delta");
-verifyTrue(testCase, all(result.table.totalPower(result.table.band ~= "highGamma") >= 0));
-verifyTrue(testCase, all(isnan(result.table.totalPower(result.table.band == "highGamma"))));
+inRange = result.table.highHz <= frequencyHz(end);
+verifyTrue(testCase, all(result.table.computable(inRange)));
+verifyTrue(testCase, all(isnan(result.table.totalPower(~inRange))));
 end
 
 function testNormalizesPerChannelModelVectors(testCase)
@@ -59,7 +60,9 @@ model(2) = struct('aperiodicFit', 0.25*ones(40,1), 'periodicFit', 0.75*ones(40,1
 cfg = lfpDefaultConfig();
 result = computeBandPower(psdResult, model, cfg.bands);
 verifyEqual(testCase, unique(result.table.channelLabel, 'stable'), ["5-6"; "7-8"]);
-verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(result.table.band ~= "highGamma"))));
+inRange = result.table.highHz <= frequencyHz(end);
+verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(inRange))));
+verifyTrue(testCase, all(isnan(result.table.aperiodicPower(~inRange))));
 end
 
 function testKeepsFailedChannelAsMissingParameterization(testCase)
@@ -76,7 +79,9 @@ result = computeBandPower(psdResult, model, cfg.bands);
 firstChannel = result.table.channelIndex == 1;
 secondChannel = result.table.channelIndex == 2;
 verifyTrue(testCase, all(isnan(result.table.aperiodicPower(firstChannel))));
-verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(secondChannel & result.table.band ~= "highGamma"))));
+inRange = result.table.highHz <= frequencyHz(end);
+verifyTrue(testCase, all(isfinite(result.table.aperiodicPower(secondChannel & inRange))));
+verifyTrue(testCase, all(isnan(result.table.aperiodicPower(secondChannel & ~inRange))));
 verifyTrue(testCase, any(contains(result.parameterizationWarnings, "insufficient_data")));
 end
 

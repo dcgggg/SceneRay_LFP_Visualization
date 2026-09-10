@@ -49,22 +49,6 @@ cfg.psd.frequencyRange = [1 35];
 cfg.psd.excludeArtifacts = true;
 cfg.psd.maxArtifactFraction = 0;
 cfg.psd.aggregationMethod = "mean";
-cfg.psd.timeFrequency = struct();
-cfg.psd.timeFrequency.enabled = true;
-cfg.psd.timeFrequency.reusePsdParameters = true;
-cfg.psd.timeFrequency.windowLengthSec = 1;
-cfg.psd.timeFrequency.stepSeconds = 0.25;
-cfg.psd.timeFrequency.nfft = 0;
-cfg.psd.timeFrequency.frequencyRange = [1 40];
-cfg.psd.timeFrequency.maxArtifactFraction = 0;
-cfg.psd.timeFrequency.powerScale = "log10";
-cfg.psd.timeFrequency.colorLimits = "auto";
-cfg.psd.timeFrequency.colorLimitsManual = [-5 1];
-cfg.psd.timeFrequency.colormap = "parula";
-cfg.psd.timeFrequency.baselineEnabled = false;
-cfg.psd.timeFrequency.baselineRangeSec = [0 0];
-cfg.psd.timeFrequency.multitaper = struct('timeBandwidthProduct', 3.5, ...
-    'taperCount', floor(2 * 3.5) - 1, 'weighting', "equal");
 
 cfg.fooof = struct();
 cfg.fooof.frequencyRange = [1 35];
@@ -139,20 +123,12 @@ metadata(end+1) = item("psd.multitaper.timeBandwidthProduct", cfg.psd.multitaper
     "DPSS time-bandwidth product. Derived half-bandwidth is NW/T and total smoothing is approximately 2NW/T.", "PSD");
 metadata(end+1) = item("psd.multitaper.taperCount", cfg.psd.multitaper.taperCount, "double", "count", [1 Inf], [], ...
     "Number of DPSS tapers; default floor(2*NW)-1.", "PSD");
-metadata(end+1) = item("psd.timeFrequency", cfg.psd.timeFrequency, "struct", "", [], [], ...
-    "Sliding-window time-frequency parameters. Invalid windows remain NaN and time gaps are not compressed.", "PSD");
-metadata(end+1) = item("psd.timeFrequency.windowLengthSec", cfg.psd.timeFrequency.windowLengthSec, "double", "s", [eps Inf], [], ...
-    "Independent sliding-window length when PSD parameters are not reused.", "PSD");
-metadata(end+1) = item("psd.timeFrequency.stepSeconds", cfg.psd.timeFrequency.stepSeconds, "double", "s", [eps Inf], [], ...
-    "Sliding-window step; overlap is derived from window length and step.", "PSD");
-metadata(end+1) = item("psd.timeFrequency.frequencyRange", cfg.psd.timeFrequency.frequencyRange, "double", "Hz", [0 Inf], [], ...
-    "Time-frequency frequency range; invalid windows remain NaN.", "PSD");
 metadata(end+1) = item("psd.maxArtifactFraction", cfg.psd.maxArtifactFraction, "double", "fraction", [0 1], [], ...
     "Maximum invalid/artifact fraction accepted in a PSD window when exclusion is enabled.", "PSD");
 metadata(end+1) = item("fooof.frequencyRange", cfg.fooof.frequencyRange, "double", "Hz", [0 Inf], [], ...
     "Frequency range used for fixed/no-knee parameterization.", "Spectral model");
 metadata(end+1) = item("fooof.aperiodicMode", cfg.fooof.aperiodicMode, "string", "", [], ...
-    ["fixed" "knee"], "Aperiodic model selection for native MATLAB specparam (original FOOOF naming retained for compatibility).", "Spectral model");
+    ["fixed" "knee"], "Aperiodic model selection for native MATLAB specparam.", "Spectral model");
 metadata(end+1) = item("fooof.peakWidthLimits", cfg.fooof.peakWidthLimits, "double", "Hz", [0 Inf], [], ...
     "Lower/upper Gaussian bandwidth limits; lower bound is checked against frequency resolution.", "Spectral model");
 metadata(end+1) = item("fooof.maxNumberPeaks", cfg.fooof.maxNumberPeaks, "double", "count", [1 Inf], [], ...

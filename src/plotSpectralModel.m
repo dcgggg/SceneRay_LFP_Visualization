@@ -1,5 +1,5 @@
 function handles = plotSpectralModel(modelResult, plotCfg)
-%PLOTSPECTRALMODEL Plot a FOOOF-style fixed model and its decomposition.
+%PLOTSPECTRALMODEL Plot a specparam model and its decomposition.
 %   The y-axis is log10(power), while model arrays remain linear power in
 %   MODELRESULT. Gaussian BW is plotted and reported as 2*sigma.
 

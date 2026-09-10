@@ -3,7 +3,7 @@
 ## Identified bottlenecks
 
 - The old inspection path loaded the complete CSV with `readcell` even though the GUI only displayed a preview. This created a large heterogeneous cell array before the numeric import.
-- A completed analysis rendered every result tab immediately, including dense raw traces and time-frequency images.
+- A completed analysis rendered every result tab immediately, including dense raw traces.
 - Cache flags existed, but PSD, specparam, and band power were still recomputed on every run.
 - Long loops did not yield to the event queue, so the window appeared frozen and cancellation could only occur between modules.
 - Several toolbar and parameter-grid columns used fixed pixel widths; long Chinese labels could overlap or be clipped.
@@ -12,11 +12,11 @@
 
 - CSV inspection streams at most 200 rows by default. Generic rectangular data use `readmatrix`; SceneRay multi-block files use a one-pass block-aware stream parser.
 - Import metadata records the strategy, source size, estimated canonical-array memory, and elapsed time.
-- The task manager reports preparation, artifact, PSD, specparam, band-power, and visualization stages. Native artifact, Welch, multitaper, time-frequency, and per-channel specparam loops perform cooperative progress/cancellation checks.
+- The task manager reports preparation, artifact, PSD, specparam, band-power, and visualization stages. Native artifact, Welch, multitaper, and per-channel specparam loops perform cooperative progress/cancellation checks.
 - Runtime callbacks are removed before parameters enter result structures or `processingHistory`.
 - Result tabs render lazily. Display-only changes dirty plots without invalidating numeric results.
-- Dependency-aware cache checks follow Data → Artifact → PSD → specparam → Band power. Computation settings are compared separately from time-frequency display colors/scales.
-- Raw/clean plotting defaults to 60 seconds. Longer selected ranges are reduced only for display with a min/max envelope; the full arrays remain the analysis input.
+- Dependency-aware cache checks follow Data → Artifact → PSD → specparam → Band power.
+- Raw/clean plotting defaults to the full selected record. Longer ranges are reduced only for display with a min/max envelope; the full arrays remain the analysis input.
 
 ## Measured CSV improvement
 
@@ -36,7 +36,7 @@ A separate end-to-end benchmark run after the engineering changes used the forma
 | 10 seconds, 4 channels | 0.39 MB | 0.301 s | 1.040 s | 0.132 s |
 | 10 minutes, 8 channels | 43.93 MB | 0.332 s | 0.718 s | 0.093 s |
 
-This benchmark disables artifact exclusion and time-frequency calculation to isolate CSV loading and the PSD/specparam path. It validates imported dimensions before timing analysis. Times should be treated as machine-specific, and the first small-file import includes MATLAB I/O initialization overhead.
+This benchmark disables artifact exclusion to isolate CSV loading and the PSD/specparam path. It validates imported dimensions before timing analysis. Times should be treated as machine-specific, and the first small-file import includes MATLAB I/O initialization overhead.
 
 ## Reproducible benchmark
 

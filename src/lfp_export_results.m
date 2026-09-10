@@ -20,7 +20,7 @@ if ~isfolder(outputFolder)
 end
 
 files = struct('mat', "", 'bandPowerCsv', "", 'processingLogCsv', "", 'figurePng', "", ...
-    'signalCsv', "", 'psdCsv', "", 'timeFrequencyMat', "");
+    'signalCsv', "", 'psdCsv', "");
 files.mat = fullfile(outputFolder, 'analysis_results.mat');
 save(files.mat, 'data', '-v7');
 
@@ -48,16 +48,6 @@ if isfield(data, 'spectrum') && isfield(data.spectrum, 'frequencyHz') && isfield
     psdTable = addvars(psdTable, double(data.spectrum.frequencyHz(:)), 'Before', 1, 'NewVariableNames', 'frequencyHz');
     files.psdCsv = fullfile(outputFolder, 'psd.csv');
     writetable(psdTable, files.psdCsv);
-end
-
-if isfield(data, 'spectrum') && isfield(data.spectrum, 'timeFrequency')
-    timeFrequency = data.spectrum.timeFrequency; %#ok<NASGU>
-    files.timeFrequencyMat = fullfile(outputFolder, 'time_frequency.mat');
-    save(files.timeFrequencyMat, 'timeFrequency', '-v7');
-elseif isfield(data, 'timeFrequency')
-    timeFrequency = data.timeFrequency; %#ok<NASGU>
-    files.timeFrequencyMat = fullfile(outputFolder, 'time_frequency.mat');
-    save(files.timeFrequencyMat, 'timeFrequency', '-v7');
 end
 
 if isfield(data, 'bandPower') && isfield(data.bandPower, 'table')

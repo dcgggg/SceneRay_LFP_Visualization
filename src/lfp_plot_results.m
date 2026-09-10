@@ -37,7 +37,7 @@ if numel(options.FigurePosition) == 4 && all(isfinite(options.FigurePosition))
 else
     figureHandle.Position = [80 80 1600 1100];
 end
-layout = tiledlayout(figureHandle, 4, 1, 'TileSpacing', 'loose', 'Padding', 'loose');
+layout = tiledlayout(figureHandle, 3, 1, 'TileSpacing', 'loose', 'Padding', 'loose');
 nexttile;
 plot(time(1:sampleLimit), data.signal(1:sampleLimit, channels), 'LineWidth', 0.8);
 xlabel('Time (s)'); ylabel("Signal (" + string(data.units) + ")");
@@ -87,25 +87,6 @@ else
     text(0.1, 0.5, 'Run lfp_compute_band_power to display band powers.'); axis off;
 end
 
-nexttile;
-if isfield(data, 'timeFrequency')
-    channel = channels(1);
-    tf = data.timeFrequency;
-    tfPower = double(tf.power(:, :, channel));
-    tfScale = lower(string(get_field_local(tf, 'powerScale', 'linear')));
-    if tfScale == "log10"
-        tfDisplay = NaN(size(tfPower)); valid = tfPower > 0 & isfinite(tfPower); tfDisplay(valid) = log10(tfPower(valid)); tfLabel = 'log10(power)';
-    elseif tfScale == "db"
-        tfDisplay = NaN(size(tfPower)); valid = tfPower > 0 & isfinite(tfPower); tfDisplay(valid) = 10*log10(tfPower(valid)); tfLabel = 'Power (dB)';
-    else
-        tfDisplay = tfPower; tfLabel = 'Power (units^2/Hz)';
-    end
-    imagesc(tf.timeSeconds, tf.frequencyHz, tfDisplay);
-    axis xy; xlabel('Time (s)'); ylabel('Frequency (Hz)'); cb = colorbar; cb.Label.String = tfLabel;
-    title('Time-frequency power (channel ' + string(channel) + ')');
-else
-    text(0.1, 0.5, 'Run lfp_compute_time_frequency to display the STFT.'); axis off;
-end
 displayName = data_display_name(data);
 if strlength(displayName) > 0
     sgtitle(figureHandle, displayName, 'Interpreter', 'none');
@@ -143,13 +124,5 @@ elseif strlength(source) > 0
     name = source;
 elseif strlength(ipg) > 0
     name = "IPG SN " + ipg;
-end
-end
-
-function value = get_field_local(s, name, defaultValue)
-if isstruct(s) && isfield(s, name) && ~isempty(s.(name))
-    value = s.(name);
-else
-    value = defaultValue;
 end
 end

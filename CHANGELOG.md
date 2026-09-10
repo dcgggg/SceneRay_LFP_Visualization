@@ -5,25 +5,25 @@
 - Incremental local development after v0.6.1; no remote release or push performed in this task.
 - Replaced full-file `readcell` inspection with a bounded streaming preview, added a numeric `readmatrix` path for rectangular CSV files, and added a streaming SceneRay block parser with import progress/cancellation hooks and memory metadata.
 - Upgraded the native GUI to a multi-dataset session manager: multiple CSV files remain independent, each dataset keeps raw arrays and analysis results, and selected datasets can be run sequentially.
-- Added unified dataset table controls, per-result dataset/channel selectors, PSD single/multi/subplot views, independent time-frequency tab, grouped multi-dataset band bars, Gaussian component display, and per-tab PNG/SVG/FIG/MAT export actions.
+- Added unified dataset table controls, per-result dataset/channel selectors, PSD single/multi/subplot views, grouped multi-dataset band bars, Gaussian component display, and per-tab PNG/SVG/FIG/MAT export actions.
 - Enlarged/reflowed GUI controls, added shared UI sizing parameters, shortened long labels, and preserved real CSV time origins in range controls.
-- Added configurable DPSS Multitaper PSD and sliding STFT/DPSS time-frequency outputs.
+- Added configurable DPSS Multitaper PSD.
 - Added native fixed/knee specparam parameterization and removed fitting-time interpolation.
-- Updated GUI labels to specparam（原FOOOF）, added method/multitaper/time-frequency controls, replaced band heatmap with dot facets, and removed the legacy 摘要 tab.
+- Updated GUI labels to specparam, replaced band heatmap with dot facets, and removed the legacy 摘要 tab.
 - Added import metadata for time source/unit conversion and a confirmation dialog for sampling-rate disagreement.
 - Added staged progress, cooperative cancellation, per-stage timing, dependency-aware cache reuse, lazy result-tab rendering, and actionable stage-aware errors.
-- Added a display-only min/max envelope for long raw/clean traces and changed the default waveform view to 60 seconds; full arrays remain unchanged for analysis and export.
+- Added a display-only min/max envelope for long raw/clean traces and changed the default waveform view to the full record; full arrays remain unchanged for analysis and export.
 - Reflowed fixed-width control grids, fixed overlapping band controls, and centralized GUI sizing/font choices.
 - Added reproducible small/medium/opt-in-large performance benchmarks and runtime engineering regression tests.
 
 ## [0.6.1] - 2026-09-07
 
 - Fixed native GUI import failure caused by assigning string scalars inside a `uitextarea.Value` cell array.
-- Added `lfp_table_to_uitable_data` so artifact, FOOOF and band-power result tables can display typed string/categorical values without changing analysis results.
+- Added `lfp_table_to_uitable_data` so artifact, specparam and band-power result tables can display typed string/categorical values without changing analysis results.
 - Reused the CSV inspection result during GUI confirmation and preallocated SceneRay sample parsing to reduce large-file import overhead.
 - Added regression coverage for typed table display conversion and preloaded SceneRay import.
 
-- Added a MATLAB-native `launchLfpApp`/`LfpApp` GUI for CSV import confirmation, channel/time selection, configurable artifact/PSD/FOOOF/band/plot parameters, run snapshots, cache-expiry status, result tabs, redraw and save workflows.
+- Added a MATLAB-native `launchLfpApp`/`LfpApp` GUI for CSV import confirmation, channel/time selection, configurable artifact/PSD/specparam/band/plot parameters, run snapshots, cache-expiry status, result tabs, redraw and save workflows.
 - Added `lfp_inspect_csv` and `lfp_import_csv_configured` for previewed generic CSV import while preserving the existing SceneRay block-aware importer.
 - Added GUI/import smoke tests and documented generic CSV orientation and uniform-sampling validation.
 
@@ -35,7 +35,7 @@
 - Added unified configuration, FieldTrip/native artifact API, strict artifact-aware PSD metadata, fixed/no-knee Gaussian spectral parameterization, cfg-compatible entry points, and before/after/model summary plots.
 - Parameterization now performs configurable 40-Hz harmonic interpolation on a fitting-only PSD copy and preserves raw/fitting spectra separately. Artifact comparison plots now include before/after amplitude distributions, channel fractions, event counts, and durations; plotting and cfg-compatible entry points expose parent/history handles for future GUI integration.
 
-- Added non-destructive robust artifact marking, manual Welch PSD, FOOOF-compatible fitting-only line-noise interpolation, fixed aperiodic/periodic parameterization, configurable band-power integration, artifact-aware manual STFT, overview plotting, and MAT/CSV/log/PNG export.
+- Added non-destructive robust artifact marking, manual Welch PSD, specparam-compatible fitting-only line-noise interpolation, fixed aperiodic/periodic parameterization, configurable band-power integration, overview plotting, and MAT/CSV/log/PNG export.
 
 - Initialized the MATLAB-only project structure and development rules.
 - Added a MATLAB entry-point smoke test.

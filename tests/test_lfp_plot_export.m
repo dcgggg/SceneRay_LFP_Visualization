@@ -14,7 +14,6 @@ data = struct('signal', [sin(2*pi*10*t), cos(2*pi*12*t)], 'fs', fs, ...
 data = lfp_compute_psd(data, WindowSeconds=0.5);
 data.spectrum = lfp_interpolate_line_noise(data.spectrum);
 data = lfp_compute_band_power(data, Bands=struct('name', {"alpha"}, 'rangeHz', {[8 13]}));
-data = lfp_compute_time_frequency(data, WindowSeconds=0.5, StepSeconds=0.25, FrequencyRangeHz=[1 40]);
 figureHandle = lfp_plot_results(data, Visible="off");
 verifyTrue(testCase, isgraphics(figureHandle));
 close(figureHandle);

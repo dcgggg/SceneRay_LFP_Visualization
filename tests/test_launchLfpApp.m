@@ -15,7 +15,8 @@ verifyEqual(testCase, string(app.Controls.ArtifactMethod.Value), "native");
 verifyFalse(testCase, isfield(app.Controls, 'SummaryPsdAxes'));
 verifyEqual(testCase, string(app.Controls.FooofMode.Value), "fixed");
 verifyEqual(testCase, string(app.Controls.PsdMethod.Value), "multitaper");
-verifyTrue(testCase, isgraphics(app.Controls.PsdTimeFrequencyAxes));
+verifyFalse(testCase, isfield(app.Controls, 'TfEnable'));
+verifyFalse(testCase, any(contains(string({app.Tabs.Results.Children.Title}), "时频")));
 end
 
 function testGuiRunsSyntheticPipeline(testCase)
@@ -54,41 +55,6 @@ verifyTrue(testCase, isgraphics(app.Controls.FooofModelAxes));
 verifyTrue(testCase, isgraphics(app.Controls.FooofPeaksAxes));
 verifyTrue(testCase, isgraphics(app.Controls.FooofTable));
 verifyEqual(testCase, string(app.LastPlotError), "");
-end
-
-function testGuiTimeFrequencyDisplayAndIdleClose(testCase)
-ensure_src_on_path(testCase);
-fs = 1000; t = (0:2999)' / fs;
-% A burst at a known time/frequency exercises the real stored TF matrix and
-% the GUI renderer rather than a placeholder or copied PSD.
-burst = double(t >= 1.0 & t < 1.5) .* sin(2*pi*18*t);
-data = struct('signal', burst, 'fs', fs, 'time', t, ...
-    'channelLabels', "5-6", 'channelNames', "5-6", 'channelCount', 1, 'units', "uV", ...
-    'metadata', struct('sourceFileName', "tf_gui.csv", 'displayName', "tf_gui.csv | IPG SN TEST"));
-app = launchLfpApp(Visible="off");
-testCase.addTeardown(@() delete(app));
-app.setData(data);
-app.Controls.ArtifactCheck.Value = false;
-app.Controls.PsdExclude.Value = false;
-app.Controls.AnalysisEnd.Value = t(end);
-app.Controls.DisplayEnd.Value = t(end);
-app.onRun([], []);
-tabs = app.Tabs.Results.Children;
-tfTab = tabs(contains(string({tabs.Title}), "时频"));
-app.Tabs.Results.SelectedTab = tfTab;
-% Hidden uifigure instances may defer SelectionChangedFcn until visible;
-% invoke the registered callback explicitly to exercise the same path.
-feval(app.Tabs.Results.SelectionChangedFcn, app.Tabs.Results, []);
-drawnow;
-verifyTrue(testCase, isfield(app.PsdResult, 'timeFrequency'));
-verifyTrue(testCase, isgraphics(app.Controls.PsdTimeFrequencyAxes));
-verifyTrue(testCase, contains(string(app.Controls.TfInfoResult.Text), "时频结果已计算"));
-verifyEqual(testCase, string(app.LastPlotError), "");
-app.closeApp([], []);
-verifyFalse(testCase, isgraphics(app.Figure));
-% Repeated close requests must remain harmless and must not resurrect UI.
-app.closeApp([], []);
-verifyFalse(testCase, isgraphics(app.Figure));
 end
 
 function ensure_src_on_path(testCase)

@@ -16,7 +16,7 @@ PSD units are signal-unit-squared per Hz. Welch uses one-sided FFT windows. Mult
 
 ## Aperiodic and periodic components
 
-The native model supports fixed/no-knee `L(F)=offset-exponent*log10(F)` and knee `L(F)=offset-log10(knee+F^exponent)`. Knee is estimated in positive log10(knee) coordinates with a base-MATLAB optimizer; it is not a user-supplied Hz breakpoint. Both modes perform robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). Python FOOOF/specparam is never called. `modelResult.inputPower` and `modelResult.fittingPower` are the same un-interpolated PSD grid.
+The native model supports fixed/no-knee `L(F)=offset-exponent*log10(F)` and knee `L(F)=offset-log10(knee+F^exponent)`. Knee is estimated in positive log10(knee) coordinates with a base-MATLAB optimizer; it is not a user-supplied Hz breakpoint. Both modes perform robust initial fitting, flattening, residual candidate detection, bounded Gaussian peak fitting, peak subtraction in log space, and final aperiodic refitting. Each peak reports CF (Hz), PW (log10 power above background), and BW=`2*sigma` (Hz). External Python packages are never called. `modelResult.inputPower` and `modelResult.fittingPower` are the same un-interpolated PSD grid.
 
 `lfp_interpolate_line_noise` remains as a standalone legacy/reference utility for compatibility with older sessions, but it is not called by the current parameterization path. New analyses therefore retain 40-Hz harmonics in both `inputPower` and `fittingPower` and report their influence rather than silently modifying the fit grid.
 
@@ -27,7 +27,6 @@ Implemented functions:
 - `lfp_dpss`, `lfp_compute_multitaper_psd`: base-MATLAB DPSS generation and multitaper implementation.
 - `lfp_fit_spectral_parameters`: legacy fixed offset/exponent path; fitting-only interpolation fields are ignored.
 - `lfp_compute_band_power`: total, relative, aperiodic and periodic-above-aperiodic integrations.
-- `lfp_compute_time_frequency`: artifact-aware sliding STFT/Welch or sliding DPSS time-frequency power.
 - `lfp_plot_results` and `lfp_export_results`: overview figures, MAT/CSV/log/PNG outputs.
 - `detectAndHandleArtifacts`, `computeLfpPsd`, `parameterizePowerSpectrum`, `computeBandPower`: stable cfg-based entry points for future GUI use.
 - `plotArtifactComparison`, `plotPsdComparison`, `plotBandPowerComparison`, `plotSpectralModel`: independent before/after, dot/facet and model-result plots. The GUI no longer creates the legacy summary tab.
