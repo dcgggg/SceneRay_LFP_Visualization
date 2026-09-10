@@ -87,8 +87,9 @@ for bandIndex = 1:nBands
             if isfinite(referencePower(channel)) && referencePower(channel) > 0
                 relativePower(row) = totalPower(row) / referencePower(channel);
             else
-                status(row) = "invalid_reference_range";
-                computable(row) = false;
+                % Total power remains valid even when the selected
+                % reference interval cannot provide a denominator.
+                status(row) = "reference_unavailable";
             end
             if hasParameterization
                 aperiodicPower(row) = integrate_columns(frequencyHz(bandMask), aperiodicPsd(bandMask, channel));

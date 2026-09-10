@@ -209,15 +209,24 @@ classdef LfpApp < handle
             cleanup = onCleanup(@() app.finishRun()); %#ok<NASGU>
             try
                 total = numel(datasetIndices);
+                runErrors = strings(0, 1);
                 for datasetOrder = 1:total
-                    app.checkCancellation();
-                    stageOffset = (datasetOrder - 1) * stageCountPerDataset;
-                    app.TaskManager.beginStage("Prepare dataset " + datasetOrder + "/" + total, stageOffset + 1, total * stageCountPerDataset);
-                    app.activateDataset(datasetIndices(datasetOrder), false);
-                    snapshot = app.makeRunSnapshot(cfg);
-                    app.validateRun(snapshot);
-                    app.TaskManager.finishStage("completed");
-                    app.runCurrentDataset(snapshot, datasetOrder, total, stageOffset);
+                    try
+                        app.checkCancellation();
+                        stageOffset = (datasetOrder - 1) * stageCountPerDataset;
+                        app.TaskManager.beginStage("Prepare dataset " + datasetOrder + "/" + total, stageOffset + 1, total * stageCountPerDataset);
+                        app.activateDataset(datasetIndices(datasetOrder), false);
+                        snapshot = app.makeRunSnapshot(cfg);
+                        app.validateRun(snapshot);
+                        app.TaskManager.finishStage("completed");
+                        app.runCurrentDataset(snapshot, datasetOrder, total, stageOffset);
+                    catch datasetException
+                        if strcmp(datasetException.identifier, 'LFP:UserCancelled'), rethrow(datasetException); end
+                        runErrors(end + 1, 1) = "数据集 " + datasetOrder + "：" + string(datasetException.message); %#ok<AGROW>
+                        app.Datasets(datasetIndices(datasetOrder)).status = "失败";
+                        app.logMessage(runErrors(end), 'error');
+                        try, app.TaskManager.finishStage("failed"); catch, end
+                    end
                     if app.CancelRequested, break; end
                 end
                 if ~app.CancelRequested
@@ -226,7 +235,11 @@ classdef LfpApp < handle
                     app.Controls.RunInfoLabel.Text = '完成';
                     app.Controls.RunInfoLabel.Tooltip = sprintf('完成：%d 个数据集 | 总耗时 %.3f s；详细阶段耗时见日志和保存结果。', ...
                         total, app.Performance.lastAnalysis.totalSeconds);
-                    if strlength(app.LastPlotError) > 0
+                    if ~isempty(runErrors)
+                        app.LastRunError = strjoin(runErrors, newline);
+                        app.Controls.ResultStatusLabel.Text = '部分失败';
+                        app.Controls.ResultStatusLabel.Tooltip = '部分数据集失败；成功数据集结果仍可查看，详情见日志。';
+                    elseif strlength(app.LastPlotError) > 0
                         app.Controls.ResultStatusLabel.Text = '失败';
                         app.Controls.ResultStatusLabel.Tooltip = '分析成功；绘图失败，但当前数值结果已保存。';
                     else
@@ -560,6 +573,18 @@ classdef LfpApp < handle
                 app.Data.processingHistory = struct('operation', "import", 'parameters', get_field_local(entry.metadata, 'importSettings', struct()), 'notes', "Dataset activated in GUI.");
             end
             results = entry.analysisResults;
+            % Older sessions may contain cached time-frequency results.  They
+            % remain on disk untouched, but are ignored by this version so
+            % they cannot be shown or exported as current analysis output.
+            if isfield(results, 'psdResult') && isstruct(results.psdResult) && isfield(results.psdResult, 'timeFrequency')
+                results.psdResult = rmfield(results.psdResult, 'timeFrequency');
+            end
+            if isfield(results, 'analysisData') && isstruct(results.analysisData)
+                if isfield(results.analysisData, 'timeFrequency'), results.analysisData = rmfield(results.analysisData, 'timeFrequency'); end
+                if isfield(results.analysisData, 'spectrum') && isstruct(results.analysisData.spectrum) && isfield(results.analysisData.spectrum, 'timeFrequency')
+                    results.analysisData.spectrum = rmfield(results.analysisData.spectrum, 'timeFrequency');
+                end
+            end
             if isfield(results, 'analysisData') && ~isempty(fieldnames(results.analysisData))
                 app.CleanData = results.cleanData; app.ArtifactResult = results.artifactResult;
                 app.BeforePsd = results.beforePsd; app.PsdResult = results.psdResult;
