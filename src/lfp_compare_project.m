@@ -87,7 +87,8 @@ for k=1:numel(mapping)
     entry=mapping(k); if ~isfield(entry,'session_id') || string(entry.session_id)~=string(session.session_id), continue; end
     if ~isfield(entry,'channel_id') || strlength(string(entry.channel_id))==0, continue; end
     resultIndex=find(string({channelResults.channel_id})==string(entry.channel_id),1); if isempty(resultIndex), continue; end
-    one=channelResults(resultIndex); if ~isfield(one,'bandResult')||~isstruct(one.bandResult)||~isfield(one.bandResult,'table'), continue; end
+    one=channelResults(resultIndex); if isfield(one,'status') && string(one.status)=="disabled", continue; end
+    if ~isfield(one,'bandResult')||~isstruct(one.bandResult)||~isfield(one.bandResult,'table'), continue; end
     channelIndex=find(string({session.channels.channel_id})==string(entry.channel_id),1); if isempty(channelIndex), continue; end
     oneSession=session; oneSession.channels=session.channels(channelIndex); oneMapping=entry;
     rows=append_band_rows(rows,one.bandResult.table,oneSession,run,metric,selectedBands,oneMapping,groupingBasis);
@@ -122,7 +123,10 @@ for index = 1:height(tableData)
     band = string(tableData.band(index)); if ~any(selectedBands == band), continue; end
     if ~ismember(metric, string(tableData.Properties.VariableNames)), continue; end
     channelIndex = tableData.channelIndex(index); channelId = ""; label = string(tableData.channelLabel(index));
-    if channelIndex <= numel(session.channels), channelId = string(session.channels(channelIndex).channel_id); end
+    if channelIndex <= numel(session.channels),
+        if isfield(session.channels(channelIndex),'enabled') && ~session.channels(channelIndex).enabled, continue; end
+        channelId = string(session.channels(channelIndex).channel_id);
+    end
     [include, targetLabel, groupLabel] = mapped_channel(channelMapping, session.session_id, channelId, label);
     if ~include, continue; end
     if strlength(groupLabel) == 0, groupLabel = default_group_label(session, groupingBasis); end

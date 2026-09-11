@@ -115,7 +115,7 @@ plotProjectComparison(comparison, Band="delta", Metric="totalPower");
 files = lfp_export_comparison(comparison, "comparison_output");
 ```
 
-`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
+`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签；通用 CSV 导入对话框可在确认阶段为每个选定信号列填写新的通道名称。`lfp_compare_project` 的最小比较对象是 Session–Channel 条目，允许同一 Session 的多个通道并保留自定义标签；不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
 
 项目管理 API 与 GUI 使用相同的稳定 ID、数据文件和结果缓存；GUI 不把不同 Session 的原始信号拼接计算。
 

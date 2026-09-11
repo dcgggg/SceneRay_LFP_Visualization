@@ -29,8 +29,26 @@ for k = 1:numel(project.analysisRuns)
         project.analysisRuns(k).status = 'stale_channels';
     end
 end
+affectedComparisons = strings(0,1);
+for k = 1:numel(project.comparisons)
+    mapping = get_field(project.comparisons(k), 'channel_mapping', struct([]));
+    if isempty(mapping), continue; end
+    touched = false;
+    for m = 1:numel(mapping)
+        if isfield(mapping(m),'session_id') && string(mapping(m).session_id) == sessionId && ...
+                isfield(mapping(m),'channel_id') && any(removed == string(mapping(m).channel_id))
+            touched = true; break;
+        end
+    end
+    if touched
+        project.comparisons(k).status = 'stale_channels';
+        project.comparisons(k).warnings = [string(get_field(project.comparisons(k),'warnings',strings(0,1))); ...
+            "A channel used by this comparison was removed from its Session."];
+        affectedComparisons(end+1,1) = string(project.comparisons(k).comparison_id); %#ok<AGROW>
+    end
+end
 report = struct('sessionId', sessionId, 'removedChannelIds', removed, ...
-    'cacheFilesRetained', true, 'affectedRunIds', strings(0,1), ...
+    'cacheFilesRetained', true, 'affectedRunIds', strings(0,1), 'affectedComparisonIds', affectedComparisons, ...
     'warnings', "Existing analysis/comparison references are retained as historical records and marked stale.");
 if ~isempty(project.analysisRuns)
     report.affectedRunIds = string({project.analysisRuns(string({project.analysisRuns.session_id}) == sessionId).run_id})';
@@ -44,4 +62,8 @@ for s = 1:numel(project.subjects)
     k = find(string({project.subjects(s).sessions.session_id}) == id, 1);
     if ~isempty(k), si = s; ki = k; return; end
 end
+end
+
+function value = get_field(source, name, fallback)
+if isstruct(source) && isfield(source, name) && ~isempty(source.(name)), value = source.(name); else, value = fallback; end
 end

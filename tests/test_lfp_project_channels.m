@@ -40,6 +40,18 @@ t=(0:999)'/1000;data=struct('time',t,'signal',randn(1000,2),'fs',1000,'channelLa
 ids=string(session.channels(2).channel_id);tbl=table(ids,'VariableNames',{'channel_id'});tbl.enabled=false;[project,~]=lfp_project_update_channels(project,sessionId,tbl,Save=false);
 [session,~]=lfp_project_find_session(project,sessionId);verifyFalse(testCase,session.channels(2).enabled);
 [project,~]=lfp_project_remove_channels(project,sessionId,ids,Save=false);[session,~]=lfp_project_find_session(project,sessionId);verifyEqual(testCase,numel(session.channels),1);verifyTrue(testCase,isfile(cache));
+[reloaded,~]=lfp_project_get_session_data(project,sessionId);verifySize(testCase,reloaded.signal,[1000 1]);verifyEqual(testCase,reloaded.signal, data.signal(:,1));
+end
+
+function testIndependentChannelsSupportChannelLevelPsdComparison(testCase)
+[project,sessionId,root]=make_project();cleanup=onCleanup(@()cleanup_root(root));fs=200;t=(0:fs*3-1)'/fs;
+first=struct('time',t,'signal',[sin(2*pi*8*t),sin(2*pi*12*t)],'fs',fs,'channelLabels',["01" "12"],'units',"uV",'metadata',struct());
+[project,~]=lfp_project_attach_data(project,sessionId,first,Save=false);t2=(0:fs*2-1)'/fs;second=struct('time',t2,'signal',sin(2*pi*20*t2),'fs',fs,'channelLabels',"23",'units',"uV",'metadata',struct());
+[project,~]=lfp_project_append_data(project,sessionId,second,Save=false);cfg=lfpDefaultConfig();cfg.artifact.strictMode=false;cfg.psd.windowLengthSec=1;cfg.psd.frequencyRange=[1 35];cfg.fooof.frequencyRange=[1 35];
+[project,summary]=lfp_analyze_project(project,sessionId,Config=cfg,ComputeSpecparam=false,ComputeBandPower=true,Save=true);verifyEqual(testCase,string(summary.status),"ok");
+[session,~]=lfp_project_find_session(project,sessionId);mapping(1)=struct('session_id',sessionId,'channel_id',session.channels(1).channel_id,'channel_label',"01",'target_label',"01",'group_label',"G");mapping(2)=struct('session_id',sessionId,'channel_id',session.channels(3).channel_id,'channel_label',"23",'target_label',"23",'group_label',"G");
+spec=struct('type',"within_subject",'session_ids',sessionId,'bands',"alpha",'metric',"totalPower",'channel_mapping',mapping);[~,comparison]=lfp_compare_project(project,spec,Config=cfg,ComputeMissing=false,Save=false);
+verifyEqual(testCase,string(comparison.psd_summary.status),"ok");verifySize(testCase,comparison.psd_summary.psd,[numel(comparison.psd_summary.frequencyHz) 2]);verifyEqual(testCase,comparison.session_count,1);
 end
 
 function testGuiImportBridgeAppendsWithoutReparsingOldChannels(testCase)

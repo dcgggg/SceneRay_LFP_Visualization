@@ -280,7 +280,7 @@ classdef LfpProjectApp < handle
             cp=uipanel(g,'Title','比较候选（筛选不会清除已选择对象）');c=uigridlayout(cp,[2 8]);c.RowHeight={32,'1x'};c.ColumnWidth={45,110,45,110,65,110,110,'1x'};
             uilabel(c,'Text','被试');app.Controls.FilterSubject=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','访视');app.Controls.FilterVisit=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','分析状态');app.Controls.FilterStatus=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());app.Controls.SelectFiltered=uibutton(c,'Text','全选筛选结果','ButtonPushedFcn',@(~,~)app.selectFiltered());app.Controls.ClearComparison=uibutton(c,'Text','清空选择','ButtonPushedFcn',@(~,~)app.clearComparisonSelection());
             app.Controls.CandidateTable=uitable(c,'Data',cell(0,7),'ColumnName',{'选择','被试','Session','访视','条件','结果状态','稳定 ID'},'ColumnEditable',[true false false false false false false],'RowName',[],'CellEditCallback',@(~,e)app.onCandidateEdited(e));app.Controls.CandidateTable.Layout.Row=2;app.Controls.CandidateTable.Layout.Column=[1 8];
-            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};left=uigridlayout(s,[2 1]);left.RowHeight={'1x',30};left.Padding=[0 0 0 0];app.Controls.SelectedSessions=uilistbox(left,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');lb=uigridlayout(left,[1 2]);lb.ColumnWidth={100,'1x'};lb.Padding=[0 0 0 0];app.Controls.RemoveSelectedComparison=uibutton(lb,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedComparison());app.Controls.SelectedCount=uilabel(lb,'Text','已选择 0 条','HorizontalAlignment','right');right=uigridlayout(s,[2 1]);right.RowHeight={'1x',90};right.Padding=[0 0 0 0];app.Controls.SelectedObjectTable=uitable(right,'Data',cell(0,8),'ColumnName',{'被试','Session','访视','条件','通道','结果状态','比较组','稳定 ID'},'ColumnEditable',[false false false false false false true false],'RowName',[],'CellEditCallback',@(~,e)app.onSelectedObjectEdited(e));app.Controls.MappingTable=uitable(right,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
+            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};left=uigridlayout(s,[2 1]);left.RowHeight={'1x',34};left.Padding=[0 0 0 0];app.Controls.SelectedSessions=uilistbox(left,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');lb=uigridlayout(left,[1 4]);lb.ColumnWidth={88,120,120,'1x'};lb.Padding=[0 0 0 0];app.Controls.RemoveSelectedComparison=uibutton(lb,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedComparison());app.Controls.CompareChannelLabel=uidropdown(lb,'Items',{'(通道标签)'},'Value','(通道标签)');app.Controls.AddMatchingChannels=uibutton(lb,'Text','按标签添加','ButtonPushedFcn',@(~,~)app.addMatchingChannels());app.Controls.SelectedCount=uilabel(lb,'Text','已选择 0 条','HorizontalAlignment','right');right=uigridlayout(s,[2 1]);right.RowHeight={'1x',90};right.Padding=[0 0 0 0];app.Controls.SelectedObjectTable=uitable(right,'Data',cell(0,8),'ColumnName',{'被试','Session','访视','条件','通道','结果状态','比较组','稳定 ID'},'ColumnEditable',[false false false false false false true false],'RowName',[],'CellEditCallback',@(~,e)app.onSelectedObjectEdited(e));app.Controls.MappingTable=uitable(right,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
             x=uigridlayout(g,[2 8]);x.RowHeight={32,32};x.ColumnWidth={55,110,65,110,70,120,110,'1x'};x.Padding=[0 0 0 0];
             uilabel(x,'Text','指标');app.Controls.CompareMetric=uidropdown(x,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower');uilabel(x,'Text','频段');app.Controls.CompareBand=uidropdown(x,'Items',{'delta','theta','alpha','beta','lowGamma','highGamma'},'Value','beta');uilabel(x,'Text','分组依据');app.Controls.CompareGroupingBasis=uidropdown(x,'Items',{'custom','subject_group','visit'},'Value','custom');app.Controls.CompareButton=uibutton(x,'Text','生成比较','ButtonPushedFcn',@(~,~)app.onCompare(false));app.Controls.CompareStatus=uilabel(x,'Text','未比较');
             uilabel(x,'Text','图形');app.Controls.ComparePlot=uidropdown(x,'Items',{'点图','柱状图','分组 PSD','分组频带柱图'},'Value','分组频带柱图','ValueChangedFcn',@(~,~)app.renderComparison());uilabel(x,'Text','汇总');app.Controls.CompareAggregation=uidropdown(x,'Items',{'session','subject'},'Value','session');uilabel(x,'Text','');app.Controls.UnifyCompare=uibutton(x,'Text','统一参数重算','ButtonPushedFcn',@(~,~)app.onCompare(true));
@@ -368,10 +368,11 @@ classdef LfpProjectApp < handle
             g=uigridlayout(dg,[4 1]);g.RowHeight={36,'1x',130,42};g.Padding=[8 8 8 8];
             uilabel(g,'Text',"归属："+app.Project.name+" / "+subject.subject_id+" / "+session.session_id,'FontWeight','bold');
             uitable(g,'Data',inspection.preview,'ColumnEditable',false,'RowName',[]);
-            f=uigridlayout(g,[3 8]);f.RowHeight={34,34,34};f.ColumnWidth={80,95,80,95,80,95,95,'1x'};
+            f=uigridlayout(g,[4 8]);f.RowHeight={34,34,34,42};f.ColumnWidth={80,95,80,95,80,95,95,'1x'};
             uilabel(f,'Text','格式');format=uidropdown(f,'Items',{'自动','SceneRay','通用 CSV'},'Value','自动');uilabel(f,'Text','采样率 Hz');fs=uieditfield(f,'numeric','Value',1000);uilabel(f,'Text','单位');units=uieditfield(f,'text','Value','uV');uilabel(f,'Text','时间单位');timeUnit=uidropdown(f,'Items',{'s','ms'},'Value','s');
             uilabel(f,'Text','表头行');header=uieditfield(f,'numeric','Value',inspection.headerRowSuggestion);uilabel(f,'Text','数据起始行');start=uieditfield(f,'numeric','Value',inspection.dataStartRowSuggestion);uilabel(f,'Text','时间列(0=无)');time=uieditfield(f,'numeric','Value',inspection.timeColumnSuggestion);uilabel(f,'Text','信号列');signal=uieditfield(f,'text','Value',strjoin(string(inspection.signalColumnsSuggestion),','));
-            tip=uilabel(f,'Text',join(string(inspection.warnings),'；'),'WordWrap','on','FontColor',[.5 .3 0]);tip.Layout.Row=3;tip.Layout.Column=[1 8];
+            uilabel(f,'Text','通道名称');defaultNames=string(inspection.channelNamesSuggestion);if ~isempty(inspection.signalColumnsSuggestion)&&numel(defaultNames)>=max(inspection.signalColumnsSuggestion),defaultNames=defaultNames(inspection.signalColumnsSuggestion);end;channelNames=uieditfield(f,'text','Value',strjoin(defaultNames,','));channelNames.Layout.Column=[2 8];
+            tip=uilabel(f,'Text',join(string(inspection.warnings),'；'),'WordWrap','on','FontColor',[.5 .3 0]);tip.Layout.Row=4;tip.Layout.Column=[1 8];
             b=uigridlayout(g,[1 3]);b.ColumnWidth={'1x',100,100};spacer=uibutton(b,'Text','');spacer.Visible='off';uibutton(b,'Text','取消','ButtonPushedFcn',@cancel);uibutton(b,'Text','确认导入','ButtonPushedFcn',@accept);
             dg.CloseRequestFcn=@cancel;uiwait(dg);if isgraphics(dg),settings=dg.UserData;delete(dg);end
             function cancel(~,~),if isgraphics(dg),dg.UserData=[];uiresume(dg);end,end
@@ -384,8 +385,10 @@ classdef LfpProjectApp < handle
                         '采样率不一致','Options',{'使用时间列推算值','保留输入值','返回修改'},'DefaultOption',1,'CancelOption',3);
                     if strcmp(choice,'返回修改'),return;elseif strcmp(choice,'使用时间列推算值'),fs.Value=inspection.estimatedSamplingRateHz;end
                 end
+                names=strtrim(string(split(string(channelNames.Value),',')));names=names(strlength(names)>0);
+                if ~isempty(names) && numel(names)~=numel(cols),uialert(dg,'通道名称数量必须与信号列数量一致。','导入设置');return;end
                 dg.UserData=struct('Inspection',inspection,'SamplingRateHz',fs.Value,'Units',string(units.Value),'TimeUnit',string(timeUnit.Value), ...
-                    'HeaderRow',header.Value,'DataStartRow',start.Value,'TimeColumn',time.Value,'SignalColumns',cols(:)','UseSceneRay',useScene);
+                    'HeaderRow',header.Value,'DataStartRow',start.Value,'TimeColumn',time.Value,'SignalColumns',cols(:)','ChannelLabels',names(:)','UseSceneRay',useScene);
                 uiresume(dg);
             end
         end
@@ -588,6 +591,7 @@ classdef LfpProjectApp < handle
 
         function refreshComparisonCandidates(app)
             if app.noProject(),app.Controls.CandidateTable.Data=cell(0,7);return;end
+            app.refreshComparisonChannelLabels();
             rows=cell(0,7);sf=string(app.Controls.FilterSubject.Value);vf=string(app.Controls.FilterVisit.Value);rf=string(app.Controls.FilterStatus.Value);
             for i=1:numel(app.Project.subjects),subject=app.Project.subjects(i);if sf~="全部"&&subject.subject_id~=sf,continue;end
                 for j=1:numel(subject.sessions),session=subject.sessions(j);if vf~="全部"&&session.visit_label~=vf,continue;end;if rf~="全部"&&session.status~=rf,continue;end
@@ -598,6 +602,29 @@ classdef LfpProjectApp < handle
             app.Controls.CandidateTable.Data=rows;app.refreshSelectedSessions();
         end
 
+        function refreshComparisonChannelLabels(app)
+            if ~isfield(app.Controls,'CompareChannelLabel') || app.noProject(), return; end
+            labels=strings(0,1);
+            for s=1:numel(app.Project.subjects)
+                for k=1:numel(app.Project.subjects(s).sessions)
+                    session=app.Project.subjects(s).sessions(k);if isempty(session.channels),continue;end
+                    labels=[labels;string({session.channels.original_label})']; %#ok<AGROW>
+                    if isfield(session.channels,'display_label'),labels=[labels;string({session.channels.display_label})'];end %#ok<AGROW>
+                end
+            end
+            labels=unique(labels(strlength(labels)>0),'stable');if isempty(labels),labels="(通道标签)";end
+            app.setDropdownItems(app.Controls.CompareChannelLabel,labels);
+        end
+
+        function addMatchingChannels(app)
+            if app.noProject() || isempty(app.CompareSelectedSessionIds), app.warn('请先选择至少一个 Session。'); return; end
+            label=string(app.Controls.CompareChannelLabel.Value);if startsWith(label,'('),app.warn('请选择通道标签。');return;end
+            report=lfp_match_channel_labels_across_sessions(app.Project,app.CompareSelectedSessionIds,label);
+            found=report.entries(string({report.entries.status})=="found");if isempty(found),app.warn('未找到唯一匹配：缺失 '+string(report.missingCount)+'，歧义 '+string(report.ambiguousCount)+'。');return;end
+            rows=app.Controls.MappingTable.Data;for k=1:numel(found),entry=found(k);same=~isempty(rows)&&any(string(rows(:,1))==entry.session_id&string(rows(:,2))==entry.channel_label);if ~same,rows(end+1,:)={char(entry.session_id),char(entry.channel_label),char(entry.channel_label)};end,end;app.Controls.MappingTable.Data=rows;
+            app.setStatus('就绪',sprintf('按标签添加 %d 个通道；缺失 %d、歧义 %d。',report.foundCount,report.missingCount,report.ambiguousCount),0);
+        end
+
         function onCandidateEdited(app,event)
             row=event.Indices(1);data=app.Controls.CandidateTable.Data;id=string(data{row,7});if logical(data{row,1}),app.CompareSelectedSessionIds=unique([app.CompareSelectedSessionIds;id],'stable');else,app.CompareSelectedSessionIds(app.CompareSelectedSessionIds==id)=[];end;app.refreshSelectedSessions();
         end
@@ -606,11 +633,11 @@ classdef LfpProjectApp < handle
         function removeSelectedComparison(app),selected=string(app.Controls.SelectedSessions.Value);selected=selected(selected~="(未选择)");keep=~ismember(app.CompareSelectedSessionIds,selected);app.CompareSelectedSessionIds=app.CompareSelectedSessionIds(keep);app.CompareGroupLabels=app.CompareGroupLabels(keep);app.refreshComparisonCandidates();end
 
         function refreshSelectedSessions(app)
-            ids=app.CompareSelectedSessionIds(:);app.Controls.SelectedCount.Text=char("已选择 "+string(numel(ids))+" 条（"+string(numel(unique(app.subject_ids_for_sessions(ids))))+" 个被试）");
+            ids=app.CompareSelectedSessionIds(:);mappingCount=size(app.Controls.MappingTable.Data,1);app.Controls.SelectedCount.Text=char("已选择 "+string(mappingCount)+" 个通道条目（"+string(numel(ids))+" 个 Session，"+string(numel(unique(app.subject_ids_for_sessions(ids))))+" 个被试）");
             if isempty(ids)
                 app.Controls.SelectedSessions.Items={'(未选择)'};app.Controls.SelectedSessions.Value={'(未选择)'};app.Controls.MappingTable.Data=cell(0,3);app.Controls.SelectedObjectTable.Data=cell(0,8);app.CompareGroupLabels=strings(0,1);return;
             end
-            app.Controls.SelectedSessions.Items=cellstr(ids);app.Controls.SelectedSessions.Value=char(ids(1));old=app.Controls.MappingTable.Data;oldObjects=app.Controls.SelectedObjectTable.Data;mappingRows=cell(numel(ids),3);objectRows=cell(numel(ids),8);groups=strings(numel(ids),1);
+            app.Controls.SelectedSessions.Items=cellstr(ids);app.Controls.SelectedSessions.Value=char(ids(1));old=app.Controls.MappingTable.Data;oldObjects=app.Controls.SelectedObjectTable.Data;mappingRows=cell(0,3);objectRows=cell(numel(ids),8);groups=strings(numel(ids),1);
             for i=1:numel(ids)
                 id=ids(i);[session,subject]=lfp_project_find_session(app.Project,id);channel="";visit="";condition="";status="";subjectId="";group="Group 1";
                 if ~isempty(session)
@@ -618,9 +645,14 @@ classdef LfpProjectApp < handle
                     if ~isempty(session.channels),channel=string(session.channels(1).original_label);end
                     group=default_compare_group(app,session,subject);
                 end
-                if ~isempty(old),match=find(string(old(:,1))==id,1);if ~isempty(match),channel=string(old{match,2});target=string(old{match,3});else,target=channel;end;else,target=channel;end
+                matches=[];if ~isempty(old),matches=find(string(old(:,1))==id);end
+                if isempty(matches)
+                    mappingRows(end+1,:)={char(id),char(channel),char(channel)};
+                else
+                    for match=matches(:)', mappingRows(end+1,:)={char(id),char(old{match,2}),char(old{match,3})}; end
+                end
                 if ~isempty(oldObjects),match=find(string(oldObjects(:,8))==id,1);if ~isempty(match)&&size(oldObjects,2)>=7,group=string(oldObjects{match,7});end;end
-                if strlength(group)==0,group="Group 1";end;groups(i)=group;mappingRows(i,:)={char(id),char(channel),char(target)};objectRows(i,:)={char(subjectId),char(id),char(visit),char(condition),char(channel),char(status),char(group),char(id)};
+                if strlength(group)==0,group="Group 1";end;groups(i)=group;objectRows(i,:)={char(subjectId),char(id),char(visit),char(condition),char(channel),char(status),char(group),char(id)};
             end
             app.CompareGroupLabels=groups;app.Controls.MappingTable.Data=mappingRows;app.Controls.SelectedObjectTable.Data=objectRows;
         end
@@ -641,15 +673,36 @@ classdef LfpProjectApp < handle
         end
 
         function spec=readComparisonSpec(app)
-            ids=app.CompareSelectedSessionIds(:);subjects=strings(numel(ids),1);mapping=repmat(struct('session_id',"",'channel_id',"",'channel_label',"",'target_label',"",'group_label',""),numel(ids),1);rows=app.Controls.MappingTable.Data;
-            for i=1:numel(ids),[session,subject]=lfp_project_find_session(app.Project,ids(i));subjects(i)=subject.subject_id;chosen=string(rows{i,2});target=string(rows{i,3});labels=string({session.channels.original_label});display=string({session.channels.display_label});idx=find(labels==chosen|display==chosen,1);if isempty(idx),error('LFP:ChannelMappingMissing','Session %s 中不存在通道 %s。',ids(i),chosen);end
-                group="Group 1";if numel(app.CompareGroupLabels)>=i,group=string(app.CompareGroupLabels(i));end
-                if isfield(session.channels(idx),'enabled') && ~session.channels(idx).enabled, error('LFP:ChannelDisabled','Session %s 的通道 %s 已停用，不能加入比较。',ids(i),chosen); end
-                mapping(i)=struct('session_id',ids(i),'channel_id',string(session.channels(idx).channel_id),'channel_label',string(session.channels(idx).original_label),'target_label',target,'group_label',group);
+            sessionIds=unique(app.CompareSelectedSessionIds(:),'stable');
+            if isempty(sessionIds),error('LFP:NoSessionsSelected','请在候选表中勾选至少一个 Session。');end
+            rows=app.Controls.MappingTable.Data;
+            if isempty(rows),error('LFP:NoComparisonChannels','请至少添加一个 Session–Channel 比较条目。');end
+            mapping=repmat(struct('session_id',"",'channel_id',"",'channel_label',"",'target_label',"",'group_label',""),0,1);
+            mappedSessionIds=strings(0,1);mappingSubjects=strings(0,1);basis=string(app.Controls.CompareGroupingBasis.Value);
+            for row=1:size(rows,1)
+                sid=strtrim(string(rows{row,1}));
+                if ~any(sessionIds==sid),continue;end
+                [session,subject]=lfp_project_find_session(app.Project,sid);
+                if isempty(session),error('LFP:SessionNotFound','Session ID not found: %s',sid);end
+                chosen=strtrim(string(rows{row,2}));target=strtrim(string(rows{row,3}));
+                if strlength(chosen)==0,error('LFP:ChannelMappingMissing','Session %s 尚未选择通道。',sid);end
+                labels=string({session.channels.original_label});display=string({session.channels.display_label});idx=find(labels==chosen|display==chosen);
+                if isempty(idx),error('LFP:ChannelMappingMissing','Session %s 中不存在通道 %s。',sid,chosen);end
+                if numel(idx)>1,error('LFP:ChannelMappingAmbiguous','Session %s 中通道标签 %s 对应多个通道，请使用稳定 ID 或修改显示名称。',sid,chosen);end
+                if isfield(session.channels(idx),'enabled') && ~session.channels(idx).enabled,error('LFP:ChannelDisabled','Session %s 的通道 %s 已停用，不能加入比较。',sid,chosen);end
+                channelId=string(session.channels(idx).channel_id);
+                if any(string({mapping.session_id})==sid & string({mapping.channel_id})==channelId),continue;end
+                group="Group 1";sessionIndex=find(sessionIds==sid,1);if numel(app.CompareGroupLabels)>=sessionIndex,group=strtrim(string(app.CompareGroupLabels(sessionIndex)));end
+                if strlength(group)==0,group="Group 1";end
+                if strlength(target)==0,target=string(session.channels(idx).original_label);end
+                mapping(end+1,1)=struct('session_id',sid,'channel_id',channelId,'channel_label',string(session.channels(idx).original_label),'target_label',target,'group_label',group); %#ok<AGROW>
+                mappedSessionIds(end+1,1)=sid;mappingSubjects(end+1,1)=string(subject.subject_id); %#ok<AGROW>
             end
-            type="between_subjects";if numel(unique(subjects))==1,type="within_subject";end
-            basis=string(app.Controls.CompareGroupingBasis.Value);groups=unique(string({mapping.group_label})','stable');defs=repmat(struct('group_label',"",'basis',basis,'session_ids',strings(0,1),'subject_ids',strings(0,1)),numel(groups),1);for k=1:numel(groups),defs(k).group_label=groups(k);defs(k).session_ids=ids(string({mapping.group_label})'==groups(k));defs(k).subject_ids=unique(subjects(string({mapping.group_label})'==groups(k)),'stable');end
-            spec=struct('type',type,'session_ids',ids,'subject_ids',unique(subjects),'bands',string(app.Controls.CompareBand.Value),'metric',string(app.Controls.CompareMetric.Value),'aggregation',string(app.Controls.CompareAggregation.Value),'channel_mapping',mapping,'grouping_basis',basis,'group_defs',defs,'plot_settings',struct('type',string(app.Controls.ComparePlot.Value)));
+            if isempty(mapping),error('LFP:NoComparisonChannels','请至少添加一个有效的 Session–Channel 比较条目。');end
+            sessionIds=unique(mappedSessionIds,'stable');subjects=unique(mappingSubjects,'stable');type="between_subjects";if numel(subjects)==1,type="within_subject";end
+            groups=unique(string({mapping.group_label})','stable');defs=repmat(struct('group_label',"",'basis',basis,'session_ids',strings(0,1),'subject_ids',strings(0,1)),numel(groups),1);
+            for k=1:numel(groups),mask=string({mapping.group_label})'==groups(k);defs(k).group_label=groups(k);defs(k).session_ids=unique(string({mapping(mask).session_id})','stable');defs(k).subject_ids=unique(mappingSubjects(mask),'stable');end
+            spec=struct('type',type,'session_ids',sessionIds,'subject_ids',subjects,'bands',string(app.Controls.CompareBand.Value),'metric',string(app.Controls.CompareMetric.Value),'aggregation',string(app.Controls.CompareAggregation.Value),'channel_mapping',mapping,'grouping_basis',basis,'group_defs',defs,'plot_settings',struct('type',string(app.Controls.ComparePlot.Value)));
         end
 
         function onCompare(app,unify),try,app.compareSelected(unify);catch e,app.showError(e,'比较失败');end,end

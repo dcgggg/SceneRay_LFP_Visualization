@@ -26,38 +26,56 @@ for k = 1:numel(runIds)
     if strlength(runIds(k)) == 0, continue; end
     try
         [run, results] = lfp_load_analysis_run(project, runIds(k));
-        if ~isfield(results, 'psdResult') || ~isstruct(results.psdResult), continue; end
-        psdResult = results.psdResult;
-        f = double(psdResult.frequencyHz(:)); p = double(psdResult.psd);
-        if size(p,1) ~= numel(f) && size(p,2) == numel(f), p = p.'; end
-        if size(p,1) ~= numel(f), summary.status = "incompatible_dimensions"; summary.message = "PSD维度与频率轴不一致。"; continue; end
         [session, subject] = find_session(project, run.session_id);
         if isempty(session), continue; end
-        [channelIndex, label] = mapped_channel_index(run, session, channelMapping);
-        if isempty(channelIndex) || channelIndex > size(p,2), continue; end
-        signature = psd_signature(psdResult);
-        units = string(get_field(psdResult, 'psdUnits', "unknown"));
-        if isempty(summary.frequencyHz)
-            summary.frequencyHz = f; summary.method = string(get_field(psdResult, 'method', "unknown"));
-            summary.psd_units = units; summary.parameter_signature = signature;
-        elseif numel(f) ~= numel(summary.frequencyHz) || any(abs(f-summary.frequencyHz) > max(eps(max(abs(f))),1e-12))
-            summary.status = "incompatible_frequency_grid";
-            summary.message = "选定 PSD 的频率网格不一致；请统一 PSD 窗长/NFFT 后重算。";
-            continue;
-        elseif signature ~= summary.parameter_signature || units ~= summary.psd_units
-            summary.status = "incompatible_parameters";
-            summary.message = "选定 PSD 的方法、窗参数或功率单位不一致；请统一参数后重算。";
-            continue;
+        entries = mapping_entries(channelMapping, run.session_id);
+        if isempty(entries)
+            entries = struct('session_id',string(run.session_id),'channel_id',"",'channel_label',"",'target_label',"",'group_label',"");
         end
-        group = mapping_group(channelMapping, run.session_id);
-        if strlength(group) == 0, group = string(subject.group); end
-        if strlength(group) == 0, group = string(session.visit_label); end
-        if strlength(group) == 0, group = "未分组"; end
-        summary.psd(:,end+1) = p(:,channelIndex); %#ok<AGROW>
-        summary.session_ids(end+1,1) = string(session.session_id); %#ok<AGROW>
-        summary.subject_ids(end+1,1) = string(subject.subject_id); %#ok<AGROW>
-        summary.channel_labels(end+1,1) = label; %#ok<AGROW>
-        summary.group_labels(end+1,1) = group; %#ok<AGROW>
+        for entryIndex = 1:numel(entries)
+            entry = entries(entryIndex); channelIndex = []; label = "";
+            if isfield(results, 'channelResults') && ~isempty(results.channelResults)
+                resultIndex = find(string({results.channelResults.channel_id}) == string(get_field(entry,'channel_id',"")), 1);
+                if isempty(resultIndex), continue; end
+                one = results.channelResults(resultIndex);
+                if ~isfield(one,'psdResult') || ~isstruct(one.psdResult) || isempty(fieldnames(one.psdResult)), continue; end
+                psdResult = one.psdResult; channelIndex = 1;
+                label = string(get_field(entry,'target_label',""));
+                if strlength(label)==0, label=string(get_field(entry,'channel_label',get_field(one,'channel_label',""))); end
+            else
+                if ~isfield(results, 'psdResult') || ~isstruct(results.psdResult) || isempty(fieldnames(results.psdResult)), continue; end
+                psdResult = results.psdResult;
+                [channelIndex, label] = mapped_channel_index(run, session, entry);
+                if isempty(channelIndex), continue; end
+            end
+            f = double(psdResult.frequencyHz(:)); p = double(psdResult.psd);
+            if size(p,1) ~= numel(f) && size(p,2) == numel(f), p = p.'; end
+            if size(p,1) ~= numel(f), summary.status = "incompatible_dimensions"; summary.message = "PSD维度与频率轴不一致。"; continue; end
+            if channelIndex > size(p,2), continue; end
+            signature = psd_signature(psdResult);
+            units = string(get_field(psdResult, 'psdUnits', "unknown"));
+            if isempty(summary.frequencyHz)
+                summary.frequencyHz = f; summary.method = string(get_field(psdResult, 'method', "unknown"));
+                summary.psd_units = units; summary.parameter_signature = signature;
+            elseif numel(f) ~= numel(summary.frequencyHz) || any(abs(f-summary.frequencyHz) > max(eps(max(abs(f))),1e-12))
+                summary.status = "incompatible_frequency_grid";
+                summary.message = "选定 PSD 的频率网格不一致；请统一 PSD 窗长/NFFT 后重算。";
+                continue;
+            elseif signature ~= summary.parameter_signature || units ~= summary.psd_units
+                summary.status = "incompatible_parameters";
+                summary.message = "选定 PSD 的方法、窗参数或功率单位不一致；请统一参数后重算。";
+                continue;
+            end
+            group = string(get_field(entry,'group_label',""));
+            if strlength(group) == 0, group = string(subject.group); end
+            if strlength(group) == 0, group = string(session.visit_label); end
+            if strlength(group) == 0, group = "未分组"; end
+            summary.psd(:,end+1) = p(:,channelIndex); %#ok<AGROW>
+            summary.session_ids(end+1,1) = string(session.session_id); %#ok<AGROW>
+            summary.subject_ids(end+1,1) = string(subject.subject_id); %#ok<AGROW>
+            summary.channel_labels(end+1,1) = label; %#ok<AGROW>
+            summary.group_labels(end+1,1) = group; %#ok<AGROW>
+        end
     catch exception
         summary.status = "failed";
         summary.message = string(exception.message);
@@ -96,16 +114,12 @@ for subjectIndex = 1:numel(project.subjects)
 end
 end
 
-function [index, label] = mapped_channel_index(run, session, mapping)
+function [index, label] = mapped_channel_index(run, session, entry)
 index = 1; label = "channel 1";
-entry = struct();
-for k = 1:numel(mapping)
-    if isfield(mapping(k), 'session_id') && string(mapping(k).session_id) == string(session.session_id), entry = mapping(k); break; end
-end
-if ~isempty(fieldnames(entry)) && isfield(entry, 'channel_id') && strlength(string(entry.channel_id)) > 0
+if isfield(entry, 'channel_id') && strlength(string(entry.channel_id)) > 0
     index = find(string(run.channel_ids) == string(entry.channel_id), 1);
 end
-if isempty(index) && ~isempty(fieldnames(entry)) && isfield(entry, 'channel_label')
+if isempty(index) && isfield(entry, 'channel_label')
     index = find(string(run.channel_labels) == string(entry.channel_label), 1);
 end
 if isempty(index), index = []; return; end
@@ -113,11 +127,12 @@ if index <= numel(session.channels), label = string(session.channels(index).disp
 elseif index <= numel(run.channel_labels), label = string(run.channel_labels(index)); end
 end
 
-function group = mapping_group(mapping, sessionId)
-group = "";
+function entries = mapping_entries(mapping, sessionId)
+entries = struct([]);
+if isempty(mapping), return; end
 for k = 1:numel(mapping)
-    if isfield(mapping(k), 'session_id') && string(mapping(k).session_id) == string(sessionId) && isfield(mapping(k), 'group_label')
-        group = string(mapping(k).group_label); return;
+    if isfield(mapping(k), 'session_id') && string(mapping(k).session_id) == string(sessionId)
+        if isempty(entries), entries = mapping(k); else, entries(end+1) = mapping(k); end %#ok<AGROW>
     end
 end
 end

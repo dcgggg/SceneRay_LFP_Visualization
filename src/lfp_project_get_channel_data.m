@@ -38,17 +38,30 @@ if isfield(channel, 'cache_relative_path') && strlength(string(channel.cache_rel
     end
     return;
 end
-% Legacy fallback. It intentionally does not invent a time axis when the
-% canonical session payload is malformed.
-[sessionData, ~] = lfp_project_get_session_data(project, sessionId);
-if index > size(sessionData.signal, 2), error('LFP:ChannelCacheCorrupt', 'Legacy data has no column for channel %s.', channelId); end
-data = sessionData;
-data.signal = double(sessionData.signal(:, index));
-data.channelLabels = string(get_field(channel, 'original_label', channelId));
-if isfield(sessionData, 'metadata') && isstruct(sessionData.metadata)
-    sessionData.metadata.channel_id = channelId;
+% Legacy fallback. Load the canonical Session payload directly so a removed
+% channel cannot silently shift the column selected for another channel.
+if isempty(session.data_refs) || ~isfield(session.data_refs(1), 'relative_path')
+    error('LFP:ChannelCacheMissing', 'No channel cache or legacy Session data reference exists for %s.', channelId);
 end
-data.metadata = get_field(sessionData, 'metadata', struct());
+legacyPath = fullfile(string(project.rootPath), string(session.data_refs(1).relative_path));
+if ~isfile(legacyPath), error('LFP:ChannelCacheMissing', 'Legacy Session data file is missing: %s', legacyPath); end
+try, loaded = load(legacyPath, 'payload'); catch exception, error('LFP:ChannelCacheCorrupt', 'Cannot load legacy Session data %s: %s', legacyPath, exception.message); end
+if ~isfield(loaded,'payload') || ~isstruct(loaded.payload) || ~isfield(loaded.payload,'data') || ~isstruct(loaded.payload.data)
+    error('LFP:ChannelCacheCorrupt', 'Legacy Session payload is invalid: %s', legacyPath);
+end
+sessionData = loaded.payload.data; sourceIndex = index;
+ref = session.data_refs(1);
+if isfield(ref,'channel_ids') && ~isempty(ref.channel_ids)
+    mapped = find(string(ref.channel_ids(:)) == channelId, 1); if ~isempty(mapped), sourceIndex = mapped; end
+elseif isfield(ref,'channel_labels') && ~isempty(ref.channel_labels)
+    mapped = find(string(ref.channel_labels(:)) == string(channel.original_label), 1); if ~isempty(mapped), sourceIndex = mapped; end
+elseif isfield(sessionData,'channelLabels')
+    mapped = find(string(sessionData.channelLabels(:)) == string(channel.original_label), 1); if ~isempty(mapped), sourceIndex = mapped; end
+end
+if sourceIndex > size(sessionData.signal, 2), error('LFP:ChannelCacheCorrupt', 'Legacy data has no column for channel %s.', channelId); end
+data = sessionData; data.signal = double(sessionData.signal(:, sourceIndex));
+data.channelLabels = string(get_field(channel, 'original_label', channelId));
+if isfield(data, 'metadata') && isstruct(data.metadata), data.metadata.channel_id = channelId; end
 end
 
 function value = get_field(source, name, fallback)

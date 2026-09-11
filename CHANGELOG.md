@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added explicit Session–Channel comparison mappings, exact cross-Session label matching, multi-channel-per-Session PSD comparison, and stale-reference marking when channels are removed.
+- Added optional per-column channel-name confirmation during generic CSV import and protected legacy matrix loading from channel-column shifts after removal.
 - Added appendable Session channel imports with stable source-file/column identity, independent atomic raw caches, explicit cache corruption errors, channel enable/disable/remove operations, and per-channel analysis/result isolation for heterogeneous lengths or time axes.
 - Added `lfp_project_get_channel_data`, `lfp_project_append_data`, `lfp_project_remove_channels` and channel-level regression tests while preserving legacy synchronized Session MAT files and result formats.
 - Added relocatable nested project storage with automatic parent/name folder creation, collision-safe source CSV copies, and stable-ID Subject/Session folder references.

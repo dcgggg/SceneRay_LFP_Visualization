@@ -18,8 +18,16 @@ if numel(session.data_refs) == 1 && isfield(session.data_refs(1), 'relative_path
     if isfile(path)
         try, loaded = load(path, 'payload'); catch, loaded = struct(); end
         if isfield(loaded, 'payload') && isfield(loaded.payload, 'data')
-            data = loaded.payload.data;
-            return;
+            candidate = loaded.payload.data;
+            % A canonical matrix is safe only while its columns still map
+            % one-to-one to the active Session channels.  After channel
+            % removal, fall through to per-channel caches so a removed
+            % column cannot shift the meaning of the remaining channels.
+            activeLabels = string({session.channels.original_label})';
+            candidateLabels = string(get_field(candidate, 'channelLabels', strings(0,1))); candidateLabels = candidateLabels(:);
+            compatible = isfield(candidate, 'signal') && size(candidate.signal,2) == numel(session.channels);
+            if compatible && ~isempty(candidateLabels), compatible = numel(candidateLabels) == numel(activeLabels) && all(candidateLabels == activeLabels); end
+            if compatible, data = candidate; return; end
         end
     end
 end
@@ -54,4 +62,8 @@ for index = 1:numel(project.subjects)
     matches = find(string({project.subjects(index).sessions.session_id}) == string(sessionId), 1);
     if ~isempty(matches), session = project.subjects(index).sessions(matches); subjectIndex = index; return; end
 end
+end
+
+function value = get_field(source, name, fallback)
+if isstruct(source) && isfield(source, name) && ~isempty(source.(name)), value = source.(name); else, value = fallback; end
 end

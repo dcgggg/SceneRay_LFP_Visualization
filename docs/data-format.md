@@ -120,11 +120,15 @@ silently average repeated tests. `lfp_preview_legacy_dataset` provides a
 read-only migration preview; `lfp_migrate_legacy_dataset` requires explicit
 Subject and Session IDs and never deletes the source file.
 
-Comparison selections are stored by stable Session ID. A comparison mapping may
-define a custom `group_label` per Session, with `grouping_basis` recorded as
-`custom`, `subject_group` or `visit`; this does not change the Subject's stored
-research group. Grouped PSD summaries first average repeated Sessions within a
-Subject and then average Subjects with equal weight. Grouped band-power plots
-use the same hierarchy and report SD only when at least two Subject values are
-available. Missing or out-of-range band values remain missing and are not
-replaced by zeros.
+Comparison selections are stored by stable Session and Channel IDs. A mapping
+may contain multiple rows for one Session, so each row represents one explicit
+Session–Channel comparison object and can define its own target label; the GUI
+also provides an exact original/display-label matching shortcut across Sessions.
+Missing or ambiguous labels are reported instead of falling back to the first
+channel. A comparison mapping may define a custom `group_label` per entry, with
+`grouping_basis` recorded as `custom`, `subject_group` or `visit`; this does not
+change the Subject's stored research group. Grouped PSD summaries first average
+repeated Session–Channel entries within a Subject and then average Subjects with
+equal weight. Grouped band-power plots use the same hierarchy and report SD only
+when at least two Subject values are available. Missing or out-of-range band
+values remain missing and are not replaced by zeros.

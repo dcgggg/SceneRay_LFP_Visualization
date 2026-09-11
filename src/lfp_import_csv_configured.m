@@ -26,6 +26,7 @@ arguments
     options.Units (1,1) string = "uV"
     options.AmplitudeScale (1,1) double = 1
     options.TimeUnit (1,1) string {mustBeMember(options.TimeUnit, ["s" "ms"])} = "s"
+    options.ChannelLabels string = strings(0,1)
     options.UseSceneRay (1,1) logical = true
     options.Inspection struct = struct()
     options.ProgressCallback = []
@@ -169,6 +170,16 @@ elseif headerRow >= 1
         end
     end
 end
+if ~isempty(options.ChannelLabels)
+    requestedLabels = strtrim(string(options.ChannelLabels(:)));
+    if numel(requestedLabels) ~= size(signal,2) || any(strlength(requestedLabels)==0)
+        error('LFP:InvalidChannelLabels','ChannelLabels must contain one non-empty name for each selected signal column.');
+    end
+    if numel(unique(requestedLabels)) ~= numel(requestedLabels)
+        error('LFP:DuplicateChannelLabels','ChannelLabels must be unique within one import.');
+    end
+    channelLabels = requestedLabels;
+end
 
 metadata = struct();
 metadata.sourceFileName = string(get_filename(filename));
@@ -204,7 +215,7 @@ metadata.importSettings = struct('format', "generic", 'delimiter', options.Delim
     'headerRow', headerRow, 'dataStartRow', dataStartRow, 'timeColumn', timeColumn, ...
     'signalColumns', signalColumns, 'dataDirection', options.DataDirection, ...
     'samplingRateHz', fs, 'units', options.Units, 'amplitudeScale', options.AmplitudeScale, ...
-    'timeUnit', options.TimeUnit);
+    'timeUnit', options.TimeUnit, 'channelLabels', channelLabels);
 
 data = struct();
 data.signal = signal;
