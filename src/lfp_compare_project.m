@@ -91,9 +91,22 @@ for index = 1:height(tableData)
     qc = "ok";
     if ismember('status', tableData.Properties.VariableNames), qc = string(tableData.status(index)); end
     one = table(string(session.subject_id), string(session.session_id), string(session.visit_label), ...
-        channelId, label, string(run.run_id), "", band, metric, value, "uV^2", ...
+        channelId, label, string(run.run_id), "", band, metric, value, metric_unit(metric, session), ...
         "session", string(run.config_id), qc, 'VariableNames', rows.Properties.VariableNames);
     rows = [rows; one]; %#ok<AGROW>
+end
+end
+
+function unit = metric_unit(metric, session)
+unit = "uV^2";
+if contains(lower(string(metric)), "relative"), unit = "fraction";
+elseif contains(lower(string(metric)), "log"), unit = "log10(uV^2)";
+elseif contains(lower(string(metric)), "aperiodic") || contains(lower(string(metric)), "periodic")
+    unit = "uV^2";
+end
+if ~isempty(session.channels) && isfield(session.channels(1), 'unit') && strlength(string(session.channels(1).unit)) > 0
+    base = string(session.channels(1).unit);
+    if unit == "uV^2", unit = base + "^2"; elseif unit == "log10(uV^2)", unit = "log10(" + base + "^2)"; end
 end
 end
 

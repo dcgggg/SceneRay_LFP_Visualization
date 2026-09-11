@@ -13,7 +13,7 @@ subject.display_name = get_string(subjectInfo, 'display_name', subject.subject_i
 subject.group = get_string(subjectInfo, 'group', "");
 subject.notes = get_string(subjectInfo, 'notes', "");
 subject.sessions = template.sessions;
-if any(string({project.subjects.subject_id}) == subject.subject_id)
+if ~isempty(project.subjects) && any(string({project.subjects.subject_id}) == subject.subject_id)
     error('LFP:DuplicateSubject', 'Subject ID already exists: %s', subject.subject_id);
 end
 project.subjects(end + 1) = subject;

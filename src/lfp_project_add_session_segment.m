@@ -33,6 +33,9 @@ merged.channelNames = merged.channelLabels;
 if isfield(merged, 'metadata') && isstruct(merged.metadata)
     merged.metadata.sourceFileName = string(get_field(merged.metadata, 'sourceFileName', "")) + ";" + string(get_source_name(data));
 end
+if ~isfield(merged, 'processingHistory') || isempty(merged.processingHistory)
+    merged.processingHistory = struct('operation', "import", 'parameters', struct(), 'notes', "Session segment base record.");
+end
 merged.processingHistory(end+1) = struct('operation', "session_segment_append", ...
     'parameters', struct('session_id', sessionId, 'segment_id', get_string(segmentInfo, 'segment_id', "segment_" + string(numel(session.data_refs)+1))), ...
     'notes', "Synchronized segment appended by exact time-axis validation.");
