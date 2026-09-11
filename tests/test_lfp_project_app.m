@@ -22,6 +22,35 @@ app.close();
 verifyFalse(testCase, isgraphics(app.Figure));
 end
 
+function testProjectGuiLayoutLifecycle(testCase)
+projectRoot=fileparts(fileparts(mfilename('fullpath')));addpath(fullfile(projectRoot,'src'));
+addpath(projectRoot);testCase.addTeardown(@()rmpath(fullfile(projectRoot,'src')));testCase.addTeardown(@()rmpath(projectRoot));
+app=launch_gui(Visible="off");testCase.addTeardown(@()delete_if_valid(app));
+verifyTrue(testCase,app.UiInitialized);
+verifyFalse(testCase,app.LayoutBusy);
+verifyTrue(testCase,isgraphics(app.Controls.BodyGrid));
+
+app.UiInitialized=false;
+app.Figure.SizeChangedFcn(app.Figure,[]);drawnow;
+verifyFalse(testCase,app.LayoutBusy);
+app.UiInitialized=true;
+
+app.Figure.Position=[100 100 1100 800];
+app.Figure.SizeChangedFcn(app.Figure,[]);drawnow;
+verifyTrue(testCase,app.CompactMode);
+verifyEqual(testCase,app.Controls.BodyGrid.ColumnWidth{1},0);
+
+app.Figure.Position=[100 100 1500 900];
+app.Figure.SizeChangedFcn(app.Figure,[]);drawnow;
+verifyFalse(testCase,app.CompactMode);
+verifyEqual(testCase,app.Controls.BodyGrid.ColumnWidth{1},285);
+verifyFalse(testCase,app.LayoutBusy);
+
+app.close(true);
+verifyFalse(testCase,isgraphics(app.Figure));
+app.close(true); % Repeated close calls must remain harmless.
+end
+
 function testProjectGuiEndToEndWithoutWorkspaceInputs(testCase)
 projectRoot=fileparts(fileparts(mfilename('fullpath')));addpath(fullfile(projectRoot,'src'));
 testCase.addTeardown(@()rmpath(fullfile(projectRoot,'src')));

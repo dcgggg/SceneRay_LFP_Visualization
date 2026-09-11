@@ -25,6 +25,8 @@ classdef LfpProjectApp < handle
         Busy = false
         CancelRequested = false
         ClosingRequested = false
+        UiInitialized = false
+        LayoutBusy = false
         CompactMode = false
         NavigationOnly = false
         NavigationCollapsed = false
@@ -44,7 +46,9 @@ classdef LfpProjectApp < handle
         function close(app, force)
             if nargin < 2, force = false; end
             if app.ClosingRequested, return; end
-            if ~force && isgraphics(app.Figure) && strcmp(app.Figure.Visible,'on')
+            fig=app.Figure;
+            figureIsValid=isscalar(fig) && isgraphics(fig);
+            if ~force && figureIsValid && strcmp(fig.Visible,'on')
                 if app.Busy
                     answer=uiconfirm(app.Figure,'当前计算块结束后才能安全退出。是否请求取消并关闭？','关闭', ...
                         'Options',{'请求关闭','取消'},'DefaultOption',2,'CancelOption',2);
@@ -61,7 +65,13 @@ classdef LfpProjectApp < handle
                 end
             end
             app.ClosingRequested=true;
-            if isgraphics(app.Figure), delete(app.Figure); end
+            if figureIsValid
+                % Detach callbacks before deletion so queued resize events do
+                % not re-enter layout while the window is being destroyed.
+                fig.SizeChangedFcn=[];
+                fig.CloseRequestFcn=[];
+                delete(fig);
+            end
         end
 
         function createProjectAt(app,root,name,description)
@@ -186,13 +196,20 @@ classdef LfpProjectApp < handle
 
     methods (Access=private)
         function buildUi(app,visible)
-            app.Figure=uifigure('Name','SceneRay LFP 项目分析','Visible',char(visible), ...
+            % Keep the figure hidden and do not attach the resize callback
+            % until all controls have been assigned. uifigure can emit a size
+            % event during construction, before app.Figure/BodyGrid exist.
+            app.Figure=uifigure('Name','SceneRay LFP 项目分析','Visible','off', ...
                 'Position',[80 60 1500 900],'CloseRequestFcn',@(~,~)app.close(false), ...
-                'AutoResizeChildren','off','SizeChangedFcn',@(~,~)app.applyResponsiveLayout());
+                'AutoResizeChildren','off');
             host=uipanel(app.Figure,'BorderType','none','Units','pixels','Position',[1 1 1500 900]);app.Controls.HostPanel=host;
             root=uigridlayout(host,[3 1]);app.Controls.RootGrid=root;root.RowHeight={54,'1x',32};root.Padding=[8 8 8 8];root.RowSpacing=6;
             app.buildToolbar(root);body=uigridlayout(root,[1 2]);body.Layout.Row=2;body.ColumnWidth={285,'1x'};body.Padding=[0 0 0 0];body.ColumnSpacing=8;app.Controls.BodyGrid=body;
-            app.buildNavigation(body);app.buildWorkspace(body);app.buildStatusbar(root);app.applyResponsiveLayout();
+            app.buildNavigation(body);app.buildWorkspace(body);app.buildStatusbar(root);
+            app.UiInitialized=true;
+            app.Figure.SizeChangedFcn=@(~,~)app.applyResponsiveLayout();
+            app.applyResponsiveLayout();
+            app.Figure.Visible=char(visible);
         end
 
         function buildToolbar(app,parent)
@@ -925,27 +942,80 @@ classdef LfpProjectApp < handle
             app.applyResponsiveLayout();
         end
         function applyResponsiveLayout(app)
-            if ~isgraphics(app.Figure)||~isfield(app.Controls,'BodyGrid')||~isgraphics(app.Controls.BodyGrid),return;end
-            if isfield(app.Controls,'HostPanel')&&isgraphics(app.Controls.HostPanel)
-                app.Controls.HostPanel.Position=[1 1 app.Figure.Position(3) app.Figure.Position(4)];
+            if app.ClosingRequested || ~app.UiInitialized
+                return;
             end
-            app.CompactMode=app.Figure.Position(3)<1300;
+            fig=app.Figure;
+            if ~isscalar(fig)
+                return;
+            end
+            if ~isgraphics(fig)
+                return;
+            end
+            controls=app.Controls;
+            if ~isstruct(controls) || ~isscalar(controls)
+                return;
+            end
+            if ~isfield(controls,'BodyGrid')
+                return;
+            end
+            bodyGrid=controls.BodyGrid;
+            if ~isscalar(bodyGrid)
+                return;
+            end
+            if ~isgraphics(bodyGrid)
+                return;
+            end
+            if app.LayoutBusy
+                return;
+            end
+            app.LayoutBusy=true;
+            cleanup=onCleanup(@()app.releaseLayoutLock()); %#ok<NASGU>
+            if isfield(controls,'HostPanel')
+                hostPanel=controls.HostPanel;
+                if isscalar(hostPanel) && isgraphics(hostPanel)
+                    hostPanel.Position=[1 1 fig.Position(3) fig.Position(4)];
+                end
+            end
+            app.CompactMode=fig.Position(3)<1300;
             if app.CompactMode
-                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={190,190,78,'1x'};end
+                if isfield(controls,'CompareGrid')
+                    compareGrid=controls.CompareGrid;
+                    if isscalar(compareGrid) && isgraphics(compareGrid),compareGrid.RowHeight={190,190,78,'1x'};end
+                end
                 if app.NavigationOnly
-                    app.Controls.BodyGrid.ColumnWidth={'1x',0};app.Controls.NavigationPanel.Visible='on';app.Controls.WorkspacePanel.Visible='off';app.Controls.ToggleNavigation.Text='返回工作区';
+                    bodyGrid.ColumnWidth={'1x',0};
+                    app.setLayoutVisibility(controls,'NavigationPanel','on');app.setLayoutVisibility(controls,'WorkspacePanel','off');app.setLayoutText(controls,'ToggleNavigation','返回工作区');
                 else
-                    app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.WorkspacePanel.Visible='on';app.Controls.ToggleNavigation.Text='打开导航';
+                    bodyGrid.ColumnWidth={0,'1x'};
+                    app.setLayoutVisibility(controls,'NavigationPanel','off');app.setLayoutVisibility(controls,'WorkspacePanel','on');app.setLayoutText(controls,'ToggleNavigation','打开导航');
                 end
             else
-                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={220,220,78,'1x'};end
-                app.NavigationOnly=false;app.Controls.WorkspacePanel.Visible='on';
+                if isfield(controls,'CompareGrid')
+                    compareGrid=controls.CompareGrid;
+                    if isscalar(compareGrid) && isgraphics(compareGrid),compareGrid.RowHeight={220,220,78,'1x'};end
+                end
+                app.NavigationOnly=false;
+                app.setLayoutVisibility(controls,'WorkspacePanel','on');
                 if app.NavigationCollapsed
-                    app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.ToggleNavigation.Text='打开导航';
+                    bodyGrid.ColumnWidth={0,'1x'};
+                    app.setLayoutVisibility(controls,'NavigationPanel','off');app.setLayoutText(controls,'ToggleNavigation','打开导航');
                 else
-                    app.Controls.BodyGrid.ColumnWidth={285,'1x'};app.Controls.NavigationPanel.Visible='on';app.Controls.ToggleNavigation.Text='收起导航';
+                    bodyGrid.ColumnWidth={285,'1x'};
+                    app.setLayoutVisibility(controls,'NavigationPanel','on');app.setLayoutText(controls,'ToggleNavigation','收起导航');
                 end
             end
+        end
+        function releaseLayoutLock(app),app.LayoutBusy=false;end
+        function setLayoutVisibility(~,controls,name,value)
+            if ~isfield(controls,name),return;end
+            handle=controls.(name);
+            if isscalar(handle) && isgraphics(handle),handle.Visible=value;end
+        end
+        function setLayoutText(~,controls,name,value)
+            if ~isfield(controls,name),return;end
+            handle=controls.(name);
+            if isscalar(handle) && isgraphics(handle),handle.Text=value;end
         end
         function showWelcome(app),app.Controls.Welcome.Visible='on';app.Controls.WorkspaceTabs.Visible='off';app.Controls.SaveProject.Enable='off';end
         function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.CompareSelectedChannelKeys=strings(0,1);app.SelectedChannelRows=[];app.SelectedChannelIds=strings(0,1);app.DisplayChannelIds=strings(0,1);app.CurrentViewedChannelId="";app.AnalysisSnapshot=struct();app.applyConfigToControls();end
