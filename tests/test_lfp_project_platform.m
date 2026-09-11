@@ -90,6 +90,17 @@ verifyTrue(testCase, any(string({batch.analysis.status}) == "ok" | string({batch
 verifyTrue(testCase, isfield(batch, 'outputFile') && isfile(batch.outputFile));
 end
 
+function testSpecparamFailureDoesNotBlockOrdinaryBandPower(testCase)
+ensure_src_on_path(testCase);
+root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
+project = lfp_create_project(root, "failure isolation"); [project,~] = lfp_project_add_subject(project, struct('subject_id', "P01"));
+cfg = lfpDefaultConfig(); cfg.artifact.method="native"; cfg.artifact.strictMode=false; cfg.psd.windowLengthSec=1; cfg.psd.frequencyRange=[1 35]; cfg.fooof.frequencyRange=[1 35]; cfg.fooof.peakWidthLimits=[0 0];
+project.defaultConfig=cfg; [project,~]=lfp_project_add_session(project,"P01",fixture_data(8,10,"badmodel.csv"),struct('session_id',"S01"));
+[project,summary]=lfp_analyze_project(project,"S01",Config=cfg); %#ok<ASGLU>
+run=project.analysisRuns(1); verifyEqual(testCase,string(run.module_status.specparam),"failed"); verifyEqual(testCase,string(run.module_status.band_power),"ok");
+[~,results]=lfp_load_analysis_run(project,run.run_id); verifyTrue(testCase,isfield(results.bandResult,'table')); verifyTrue(testCase,any(results.bandResult.table.computable));
+end
+
 function data = fixture_data(seconds, frequency, fileName)
 fs = 1000; time = (0:(seconds*fs-1))' / fs;
 data = struct('signal', [sin(2*pi*frequency*time), cos(2*pi*(frequency+2)*time)], ...
