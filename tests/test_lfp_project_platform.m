@@ -73,6 +73,23 @@ exportFolder = fullfile(root, "comparison_export"); files = lfp_export_compariso
 verifyTrue(testCase, isfile(files.csv)); verifyTrue(testCase, isfile(files.mat));
 end
 
+function testConfiguredCsvBridgeAndBatchEntryPoint(testCase)
+ensure_src_on_path(testCase);
+root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
+project = lfp_create_project(root, "CSV project");
+[project, ~] = lfp_project_add_subject(project, struct('subject_id', "P01"));
+csvFile = fullfile(root, "input.csv"); t=(0:999)'/1000; writetable(table(t, sin(2*pi*10*t), 'VariableNames', {'time','channel01'}), csvFile);
+settings = struct('HeaderRow', 1, 'DataStartRow', 2, 'TimeColumn', 1, 'SignalColumns', 2, ...
+    'SamplingRateHz', 1000, 'TimeUnit', "s", 'UseSceneRay', false);
+[project, session, importInfo] = lfp_project_add_csv_session(project, "P01", csvFile, ...
+    struct('session_id', "S01", 'visit_label', "Baseline"), ImportMode="configured", ImportSettings=settings);
+verifyEqual(testCase, string(importInfo.format), "configured"); verifyEqual(testCase, session.channels(1).original_label, "channel01");
+task = struct('projectRoot', root, 'sessionIds', "S01", 'outputFolder', fullfile(root, "batch"));
+batch = lfp_run_batch(task);
+verifyTrue(testCase, any(string({batch.analysis.status}) == "ok" | string({batch.analysis.status}) == "partial_failure"));
+verifyTrue(testCase, isfield(batch, 'outputFile') && isfile(batch.outputFile));
+end
+
 function data = fixture_data(seconds, frequency, fileName)
 fs = 1000; time = (0:(seconds*fs-1))' / fs;
 data = struct('signal', [sin(2*pi*frequency*time), cos(2*pi*(frequency+2)*time)], ...

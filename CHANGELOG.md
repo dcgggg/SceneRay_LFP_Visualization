@@ -6,6 +6,7 @@
 - Added versioned `AnalysisRun` persistence, content-sensitive data/config fingerprints, independent Session analysis and cache reuse.
 - Added explicit comparison long tables, legacy migration preview/entry points and a GUI-free batch runner with a project write lock.
 - Added MATLAB tests covering multi-Session storage, multi-channel identity, analysis reuse and visit-based comparison.
+- Added synchronized Session-segment validation, CSV-to-Session import bridge, comparison plotting and long-table export.
 
 ## [0.9.0] - 2026-09-10
 
