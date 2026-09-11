@@ -159,13 +159,16 @@ classdef LfpProjectApp < handle
 
         function buildWorkspace(app,parent)
             holder=uipanel(parent,'BorderType','none');holder.Layout.Column=2;
-            app.Controls.Welcome=uipanel(holder,'BorderType','none','Position',[1 1 1000 700]);
-            wg=uigridlayout(app.Controls.Welcome,[5 3]);wg.RowHeight={'1x',60,44,44,'1x'};wg.ColumnWidth={'1x',250,'1x'};
+            hg=uigridlayout(holder,[1 1]);hg.Padding=[0 0 0 0];
+            app.Controls.Welcome=uipanel(hg,'BorderType','none');
+            app.Controls.Welcome.Layout.Row=1;app.Controls.Welcome.Layout.Column=1;
+            wg=uigridlayout(app.Controls.Welcome,[5 3]);wg.RowHeight={'1x',60,44,44,'1x'};wg.ColumnWidth={'1x',360,'1x'};
             t=uilabel(wg,'Text','SceneRay LFP 项目分析','FontSize',24,'FontWeight','bold','HorizontalAlignment','center');t.Layout.Row=2;t.Layout.Column=2;
             n=uilabel(wg,'Text','从空白项目开始，或继续已有项目。无需预先准备工作区变量。','HorizontalAlignment','center','WordWrap','on');n.Layout.Row=3;n.Layout.Column=2;
             a=uigridlayout(wg,[1 2]);a.Layout.Row=4;a.Layout.Column=2;a.ColumnWidth={'1x','1x'};
             uibutton(a,'Text','新建项目','ButtonPushedFcn',@(~,~)app.newProjectDialog());uibutton(a,'Text','打开项目','ButtonPushedFcn',@(~,~)app.openProjectDialog());
-            app.Controls.WorkspaceTabs=uitabgroup(holder,'Visible','off','SelectionChangedFcn',@(~,~)app.onWorkspaceTabChanged());
+            app.Controls.WorkspaceTabs=uitabgroup(hg,'Visible','off','SelectionChangedFcn',@(~,~)app.onWorkspaceTabChanged());
+            app.Controls.WorkspaceTabs.Layout.Row=1;app.Controls.WorkspaceTabs.Layout.Column=1;
             app.Controls.DataTab=uitab(app.Controls.WorkspaceTabs,'Title','数据管理');app.Controls.AnalysisTab=uitab(app.Controls.WorkspaceTabs,'Title','单次分析');app.Controls.CompareTab=uitab(app.Controls.WorkspaceTabs,'Title','结果比较');
             app.buildDataPage(app.Controls.DataTab);app.buildAnalysisPage(app.Controls.AnalysisTab);app.buildComparePage(app.Controls.CompareTab);
         end
@@ -225,7 +228,7 @@ classdef LfpProjectApp < handle
         function buildAnalysisResults(app,parent)
             tabs=uitabgroup(parent,'SelectionChangedFcn',@(~,~)app.refreshAnalysisView());tabs.Layout.Row=5;app.Controls.AnalysisResultTabs=tabs;
             app.Controls.RawResultTab=uitab(tabs,'Title','原始信号与伪影');r=uigridlayout(app.Controls.RawResultTab,[2 1]);r.RowHeight={'1x','1x'};app.Controls.RawAxes=uiaxes(r);app.Controls.CleanAxes=uiaxes(r);
-            app.Controls.PsdResultTab=uitab(tabs,'Title','PSD');app.Controls.PsdAxes=uiaxes(app.Controls.PsdResultTab,'Position',[55 45 760 480]);
+            app.Controls.PsdResultTab=uitab(tabs,'Title','PSD');pg=uigridlayout(app.Controls.PsdResultTab,[1 1]);pg.Padding=[8 8 8 8];app.Controls.PsdAxes=uiaxes(pg);
             app.Controls.SpecResultTab=uitab(tabs,'Title','specparam');s=uigridlayout(app.Controls.SpecResultTab,[2 2]);s.RowHeight={'1x','1x'};s.ColumnWidth={'1x',240};app.Controls.SpecModelAxes=uiaxes(s);app.Controls.SpecPeakAxes=uiaxes(s);app.Controls.SpecPeakAxes.Layout.Row=2;app.Controls.SpecQuality=uitable(s,'Data',cell(0,2),'ColumnName',{'参数','值'},'RowName',[]);app.Controls.SpecQuality.Layout.Row=[1 2];app.Controls.SpecQuality.Layout.Column=2;
             app.Controls.BandResultTab=uitab(tabs,'Title','频带功率');b=uigridlayout(app.Controls.BandResultTab,[1 2]);b.ColumnWidth={'1x',420};app.Controls.BandAxes=uiaxes(b);app.Controls.BandResultTable=uitable(b,'Data',cell(0,1),'RowName',[]);
         end

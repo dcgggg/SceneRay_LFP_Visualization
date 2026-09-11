@@ -141,6 +141,15 @@ run=project.analysisRuns(1); verifyEqual(testCase,string(run.module_status.specp
 [~,results]=lfp_load_analysis_run(project,run.run_id); verifyTrue(testCase,isfield(results.bandResult,'table')); verifyTrue(testCase,any(results.bandResult.table.computable));
 end
 
+function testConfigFingerprintChangesWithAnalysisParameters(testCase)
+ensure_src_on_path(testCase);
+first = lfpDefaultConfig();
+second = first; second.psd.frequencyRange = [1 30];
+third = first; third.plot.frequencyRange = [1 20];
+verifyNotEqual(testCase, lfp_config_fingerprint(first), lfp_config_fingerprint(second));
+verifyEqual(testCase, lfp_config_fingerprint(first), lfp_config_fingerprint(third));
+end
+
 function data = fixture_data(seconds, frequency, fileName)
 fs = 1000; time = (0:(seconds*fs-1))' / fs;
 data = struct('signal', [sin(2*pi*frequency*time), cos(2*pi*(frequency+2)*time)], ...

@@ -16,7 +16,10 @@ bytes = uint8(char(encoded));
 hashValue = uint32(2166136261);
 for index = 1:numel(bytes)
     hashValue = bitxor(hashValue, uint32(bytes(index)));
-    hashValue = hashValue * uint32(16777619);
+    % Integer multiplication saturates in MATLAB.  FNV-1a requires modulo
+    % 2^32 arithmetic; using uint32 multiplication collapsed most hashes to
+    % ffffffff and made unrelated analysis configurations share a cache key.
+    hashValue = uint32(mod(uint64(hashValue) * uint64(16777619), uint64(2)^32));
 end
 fingerprint = string(lower(dec2hex(hashValue, 8)));
 end

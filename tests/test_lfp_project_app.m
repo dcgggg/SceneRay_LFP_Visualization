@@ -28,6 +28,8 @@ root=string(tempname);mkdir(root);testCase.addTeardown(@()cleanup(root));
 app=launchLfpProjectApp(Visible="off");testCase.addTeardown(@()delete_if_valid(app));
 app.createProjectAt(root,"GUI E2E","no workspace variables");
 app.Project.defaultConfig.artifact.strictMode=false;
+app.Project.defaultConfig.psd.maxArtifactFraction=1;
+app.Controls.ArtifactZ.Value=1e6;app.Controls.JumpZ.Value=1e6;
 app.addSubjectRecord(struct('subject_id',"P01",'display_name',"P01"));
 app.addSessionRecord("P01",struct('session_id',"S01",'visit_label',"Baseline"));
 app.attachDataToSession("S01",fixture_data(10,1));
@@ -42,6 +44,7 @@ app.Controls.MappingTable.Data={'S01','channel01','STN';'S02','channel01','STN'}
 comparison=app.compareSelected(false);
 verifyEqual(testCase,string(comparison.status),"ok");
 verifyEqual(testCase,height(comparison.result_table),2);
+verifyTrue(testCase,all(isfinite(comparison.result_table.value)));
 snapshot=fullfile(root,'gui_snapshot.png');app.exportSnapshot(snapshot);verifyTrue(testCase,isfile(snapshot));
 app.close(true);app=launchLfpProjectApp(Visible="off",ProjectRoot=root);
 verifyEqual(testCase,numel(app.Project.subjects),1);

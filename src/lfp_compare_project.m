@@ -104,8 +104,10 @@ function [include, targetLabel] = mapped_channel(mapping, sessionId, channelId, 
 include = true; targetLabel = originalLabel;
 if isempty(mapping), return; end
 include = false;
-for index = 1:numel(mapping)
-    entry = mapping(index);
+% This helper is nested in append_band_rows.  Do not reuse the parent's
+% row-loop variable: nested MATLAB functions share captured variables.
+for mappingIndex = 1:numel(mapping)
+    entry = mapping(mappingIndex);
     if isfield(entry, 'session_id') && string(entry.session_id) ~= string(sessionId), continue; end
     idMatches = isfield(entry, 'channel_id') && strlength(string(entry.channel_id)) > 0 && string(entry.channel_id) == channelId;
     labelMatches = isfield(entry, 'channel_label') && strlength(string(entry.channel_label)) > 0 && string(entry.channel_label) == originalLabel;
