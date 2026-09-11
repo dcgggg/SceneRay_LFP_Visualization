@@ -15,7 +15,7 @@
 11. **Task manager** — `LfpAnalysisTaskManager` owns stage progress, elapsed-time records and cooperative cancellation. Algorithms receive temporary callbacks through `cfg`; callbacks are stripped before results are persisted.
 12. **Project platform** — `lfp_create_project`, `lfp_project_add_subject` and `lfp_project_add_session` implement the stable `Project -> Subject -> Session -> Channel` index. Raw records are stored as one file per Session under `data/`; the index remains lightweight.
 13. **AnalysisRun/cache** — `lfp_analyze_project` runs Sessions independently, creates versioned run metadata and derived result files under `results/`, and reuses a run only when both the content-sensitive data version and computation-only configuration fingerprint match.
-14. **Comparison/query** — `lfp_compare_project` reads saved band-power results into an explicit long table and records comparison type, Session IDs, visit labels, run IDs and configuration compatibility. It never concatenates raw signals or treats epochs/channels as independent subjects.
+14. **Comparison/query** — `lfp_compare_project` reads saved band-power results into an explicit long table and records comparison type, Session IDs, visit labels, run IDs and configuration compatibility. It never concatenates raw signals or treats epochs/channels as independent subjects. `plotProjectComparison` renders the table as Session-level points without inferential statistics.
 15. **Batch/migration** — `lfp_run_batch` provides a GUI-free task entry point with a project lock; `lfp_preview_legacy_dataset` and `lfp_migrate_legacy_dataset` require explicit Subject/Session identity and preserve the source file.
 
 ## Dependency policy

@@ -61,6 +61,9 @@ verifyEqual(testCase, string(comparison.status), "ok");
 verifyEqual(testCase, height(comparison.result_table), 4);
 verifyEqual(testCase, unique(string(comparison.result_table.visit_label)), "Baseline");
 verifyTrue(testCase, isfile(fullfile(root, "comparisons", comparison.comparison_id + ".mat")));
+handles = plotProjectComparison(comparison, Visible="off", Band="alpha", Metric="totalPower");
+testCase.addTeardown(@() close_if_valid(handles.figure));
+verifyTrue(testCase, isgraphics(handles.axes));
 end
 
 function data = fixture_data(seconds, frequency, fileName)
@@ -77,4 +80,8 @@ end
 function ensure_src_on_path(testCase)
 projectRoot = fileparts(fileparts(mfilename('fullpath'))); addpath(fullfile(projectRoot, 'src'));
 testCase.addTeardown(@() rmpath(fullfile(projectRoot, 'src')));
+end
+
+function close_if_valid(handle)
+if ~isempty(handle) && isgraphics(handle), close(handle); end
 end
