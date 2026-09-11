@@ -32,6 +32,13 @@ for index = 1:numel(sessionIds)
     [subjectIndex, localSessionIndex] = deal(sessionIndex(1), sessionIndex(2));
     session = project.subjects(subjectIndex).sessions(localSessionIndex);
     try
+        if should_analyze_channels(session)
+            [project, independentRun, ~, independentSummary] = lfp_analyze_independent_channels(project, session.session_id, cfg, ...
+                ComputeSpecparam=options.ComputeSpecparam, ComputeBandPower=options.ComputeBandPower, Save=options.Save, ...
+                Force=options.Force, ProgressCallback=options.ProgressCallback);
+            summary(index) = independentSummary;
+            continue;
+        end
         existing = find_reusable_run(project, session, configId, options.Force);
         if ~isempty(existing)
             summary(index).status = "reused"; summary(index).runId = existing.run_id; summary(index).configId = configId;
@@ -197,4 +204,11 @@ if ~isfield(data, 'metadata') || ~isstruct(data.metadata), data.metadata = struc
 if ~isfield(data, 'processingHistory') || isempty(data.processingHistory)
     data.processingHistory = struct('operation', "import", 'parameters', struct(), 'notes', "Project session analysis input.");
 end
+end
+
+function tf = should_analyze_channels(session)
+% Independent caches are required once multiple imports are attached to one
+% Session. A single synchronized legacy Session keeps the original matrix
+% pipeline and result format for backward compatibility.
+tf = numel(session.data_refs) > 1;
 end

@@ -49,7 +49,7 @@ end
 if ~isfield(project, 'defaultConfig') || isempty(fieldnames(project.defaultConfig))
     project.defaultConfig = lfpDefaultConfig();
 end
-project.schema_version = max(double(project.schema_version), 3);
+project.schema_version = max(double(project.schema_version), 4);
 end
 
 function array = normalize_array(array, template)

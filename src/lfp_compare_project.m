@@ -27,6 +27,7 @@ comparison.bands = string(get_field(comparisonSpec, 'bands', strings(0,1))); com
 comparison.aggregation = string(get_field(comparisonSpec, 'aggregation', "session"));
 comparison.plot_settings = get_field(comparisonSpec, 'plot_settings', struct());
 comparison.channel_mapping = get_field(comparisonSpec, 'channel_mapping', struct([]));
+comparison.channel_entries = comparison.channel_mapping;
 comparison.grouping_basis = string(get_field(comparisonSpec, 'grouping_basis', "custom"));
 comparison.group_defs = get_field(comparisonSpec, 'group_defs', struct([]));
 comparison.created_at = string(datestr(now, 31));
@@ -65,13 +66,32 @@ for index = 1:numel(runIds)
     [session, subject] = find_session(project, run.session_id); subjectId = session.subject_id;
     session.subject_group = string(subject.group);
     comparison.subject_ids(end+1,1) = subjectId; %#ok<AGROW>
-    if ~isfield(results, 'bandResult') || ~isstruct(results.bandResult) || ~isfield(results.bandResult, 'table'), continue; end
-    rows = append_band_rows(rows, results.bandResult.table, session, run, comparison.metric, ...
-        comparison.bands, comparison.channel_mapping, comparison.grouping_basis);
+    if isfield(results, 'channelResults') && ~isempty(results.channelResults)
+        rows = append_independent_band_rows(rows, results.channelResults, session, run, comparison.metric, ...
+            comparison.bands, comparison.channel_mapping, comparison.grouping_basis);
+    elseif isfield(results, 'bandResult') && isstruct(results.bandResult) && isfield(results.bandResult, 'table')
+        rows = append_band_rows(rows, results.bandResult.table, session, run, comparison.metric, ...
+            comparison.bands, comparison.channel_mapping, comparison.grouping_basis);
+    end
 end
+
 if numel(unique(configIds)) > 1
     comparison.status = "incompatible_parameters";
     comparison.warnings(end+1,1) = "选定结果的计算配置不一致；请统一参数后再比较。";
+end
+
+function rows = append_independent_band_rows(rows, channelResults, session, run, metric, selectedBands, mapping, groupingBasis)
+% Map each comparison entry to its own per-channel result payload.
+if isempty(mapping), return; end
+for k=1:numel(mapping)
+    entry=mapping(k); if ~isfield(entry,'session_id') || string(entry.session_id)~=string(session.session_id), continue; end
+    if ~isfield(entry,'channel_id') || strlength(string(entry.channel_id))==0, continue; end
+    resultIndex=find(string({channelResults.channel_id})==string(entry.channel_id),1); if isempty(resultIndex), continue; end
+    one=channelResults(resultIndex); if ~isfield(one,'bandResult')||~isstruct(one.bandResult)||~isfield(one.bandResult,'table'), continue; end
+    channelIndex=find(string({session.channels.channel_id})==string(entry.channel_id),1); if isempty(channelIndex), continue; end
+    oneSession=session; oneSession.channels=session.channels(channelIndex); oneMapping=entry;
+    rows=append_band_rows(rows,one.bandResult.table,oneSession,run,metric,selectedBands,oneMapping,groupingBasis);
+end
 end
 comparison.result_table = rows;
 comparison.subject_ids = unique(comparison.subject_ids, 'stable');

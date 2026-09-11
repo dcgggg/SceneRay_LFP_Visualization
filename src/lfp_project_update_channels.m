@@ -16,18 +16,24 @@ if ~ismember('channel_id', channelRows.Properties.VariableNames)
     error('LFP:InvalidChannelTable', 'channelRows must contain channel_id.');
 end
 channels = project.subjects(subjectIndex).sessions(sessionIndex).channels;
-editable = ["display_label" "side" "region" "contacts" "reference"];
+editable = ["display_label" "side" "region" "contacts" "reference" "enabled" "quality_status"];
 for row = 1:height(channelRows)
     index = find(string({channels.channel_id}) == string(channelRows.channel_id(row)), 1);
     if isempty(index), error('LFP:ChannelNotFound', 'Unknown channel ID: %s', string(channelRows.channel_id(row))); end
     for name = editable
         fieldName = char(name);
         if ismember(fieldName, channelRows.Properties.VariableNames)
-            channels(index).(fieldName) = string(channelRows.(fieldName)(row));
+            value = channelRows.(fieldName)(row);
+            if strcmp(fieldName, 'enabled')
+                channels(index).enabled = logical(value);
+            else
+                channels(index).(fieldName) = string(value);
+            end
         end
     end
 end
 project.subjects(subjectIndex).sessions(sessionIndex).channels = channels;
+lfp_project_write_channel_manifest(project, project.subjects(subjectIndex).sessions(sessionIndex));
 if options.Save, lfp_save_project(project); end
 end
 

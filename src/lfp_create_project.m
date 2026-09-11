@@ -18,7 +18,7 @@ end
 if ~isfolder(projectRoot), mkdir(projectRoot); end
 name = lfp_validate_folder_name(name, "项目名称");
 [project, ~, ~, ~, ~, ~] = lfp_project_schema();
-project.schema_version = 3;
+project.schema_version = 4;
 project.storage_mode = "legacy_root";
 project.project_id = lfp_make_id("project");
 project.name = name;

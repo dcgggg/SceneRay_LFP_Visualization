@@ -49,15 +49,27 @@ newRef = struct('relative_path', relativePath, 'source_path', get_source_path(da
     'project_copy_relative_path', "", ...
     'source_file_name', get_source_name(data), 'segment_id', get_string(segmentInfo, 'segment_id', "segment_" + string(numel(session.data_refs)+1)), ...
     'sample_count', size(data.signal,1), 'channel_count', size(data.signal,2), 'fs', double(data.fs), ...
-    'time_start', newTime(1), 'time_end', newTime(end), 'channel_labels', newLabels(:));
+    'time_start', newTime(1), 'time_end', newTime(end), 'channel_labels', newLabels(:), ...
+    'channel_ids', strings(numel(newLabels),1), 'cache_relative_paths', strings(numel(newLabels),1), ...
+    'source_file_id', "", 'source_file_fingerprint', "", 'import_config', struct(), ...
+    'time_unit', "s", 'signal_unit', string(get_field(data, 'units', "unknown")), ...
+    'imported_at', string(datestr(now,31)), 'cache_version', "1");
 session.data_refs(end+1) = newRef;
 [~, ~, ~, channelTemplate, ~, ~] = lfp_project_schema();
+newIds = strings(numel(newLabels),1); newCaches = strings(numel(newLabels),1);
 for index = 1:numel(newLabels)
     channel = channelTemplate; channel.original_label = newLabels(index); channel.display_label = newLabels(index);
     channel.channel_id = make_channel_id(newLabels(index), index, session.channels); channel.unit = string(get_field(data, 'units', "unknown"));
+    channel.session_id = sessionId; channel.source_column = index; channel.sampling_rate_hz = double(data.fs); channel.sample_count = size(data.signal,1);
+    channel.time_start = newTime(1); channel.time_end = newTime(end); channel.enabled = true;
+    channel.data_revision = lfp_data_version(struct('signal',data.signal(:,index),'fs',data.fs,'time',data.time,'channelLabels',newLabels(index)));
+    channel.source_metadata = struct('source_file_name', get_source_name(data), 'source_file_path', get_source_path(data), 'source_column', index);
+    newIds(index)=channel.channel_id; newCaches(index)=lfp_project_save_channel_cache(project,session,channel,newTime,double(data.signal(:,index)),channel.source_metadata); channel.cache_relative_path=newCaches(index);
     session.channels(end+1) = channel; %#ok<AGROW>
 end
+session.data_refs(end).channel_ids = newIds; session.data_refs(end).cache_relative_paths = newCaches;
 project.subjects(subjectIndex).sessions(sessionIndex) = session;
+lfp_project_write_channel_manifest(project, session);
 if options.Save, lfp_save_project(project); end
 end
 

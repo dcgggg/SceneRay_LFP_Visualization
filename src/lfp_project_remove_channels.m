@@ -1,0 +1,47 @@
+function [project, report] = lfp_project_remove_channels(project, sessionId, channelIds, options)
+%LFP_PROJECT_REMOVE_CHANNELS Remove channels from the active Session index.
+%   Shared raw/channel cache files are intentionally retained. Existing
+%   AnalysisRuns and comparison plans are marked stale through the report;
+%   callers may decide whether to remove those references explicitly.
+
+arguments
+    project (1,1) struct
+    sessionId (1,1) string
+    channelIds string
+    options.Save (1,1) logical = true
+end
+channelIds = unique(string(channelIds(:)), 'stable');
+[si, ki] = locate_session(project, sessionId);
+if isempty(si), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
+session = project.subjects(si).sessions(ki);
+ids = string({session.channels.channel_id});
+mask = ismember(ids, channelIds);
+if ~any(mask), error('LFP:ChannelNotFound', 'No requested channel IDs exist in Session %s.', sessionId); end
+removed = ids(mask);
+session.channels(mask) = [];
+session.data_version = string(session.data_version) + "_channels_removed_" + string(datestr(now, 'yyyymmddHHMMSS'));
+session.status = 'imported';
+project.subjects(si).sessions(ki) = session;
+lfp_project_write_channel_manifest(project, session);
+% Keep historical run files, but make their active channel set explicit.
+for k = 1:numel(project.analysisRuns)
+    if string(project.analysisRuns(k).session_id) == sessionId
+        project.analysisRuns(k).status = 'stale_channels';
+    end
+end
+report = struct('sessionId', sessionId, 'removedChannelIds', removed, ...
+    'cacheFilesRetained', true, 'affectedRunIds', strings(0,1), ...
+    'warnings', "Existing analysis/comparison references are retained as historical records and marked stale.");
+if ~isempty(project.analysisRuns)
+    report.affectedRunIds = string({project.analysisRuns(string({project.analysisRuns.session_id}) == sessionId).run_id})';
+end
+if options.Save, lfp_save_project(project); end
+end
+
+function [si, ki] = locate_session(project, id)
+si = []; ki = [];
+for s = 1:numel(project.subjects)
+    k = find(string({project.subjects(s).sessions.session_id}) == id, 1);
+    if ~isempty(k), si = s; ki = k; return; end
+end
+end

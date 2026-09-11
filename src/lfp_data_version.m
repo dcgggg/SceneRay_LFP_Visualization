@@ -17,7 +17,10 @@ payload = struct('size', size(data.signal), 'fs', double(data.fs), ...
 text = jsonencode(payload);
 bytes = uint8(char(text));
 h = uint32(2166136261);
-for index = 1:numel(bytes), h = bitxor(h, uint32(bytes(index))); h = h * uint32(16777619); end
+for index = 1:numel(bytes)
+    h = bitxor(h, uint32(bytes(index)));
+    h = uint32(mod(uint64(h) * uint64(16777619), uint64(2)^32));
+end
 version = string(lower(dec2hex(h, 8)));
 end
 

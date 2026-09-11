@@ -23,12 +23,26 @@ end
 labels = string(get_field(data, 'channelLabels', "channel_" + string((1:size(data.signal,2))')));
 labels = labels(:);
 channels = channelTemplate([]);
+sourcePath = get_source(data, 'sourceFilePath');
+sourceFingerprint = "";
+if strlength(sourcePath) > 0 && isfile(sourcePath), sourceFingerprint = lfp_file_fingerprint(sourcePath); end
+sourceFileId = "";
+if strlength(sourceFingerprint) > 0, sourceFileId = "file_" + extractBefore(sourceFingerprint, min(strlength(sourceFingerprint), 13)); end
+if strlength(sourceFileId) == 0, sourceFileId = "file_" + lfp_make_id('source'); end
+cachePaths = strings(0,1); channelIds = strings(0,1);
 for channelIndex = 1:size(data.signal, 2)
     channel = channelTemplate;
     channel.original_label = labels(channelIndex);
     channel.display_label = labels(channelIndex);
     channel.channel_id = make_channel_id(labels(channelIndex), channelIndex, channels);
     channel.unit = string(get_field(data, 'units', "unknown"));
+    channel.session_id = sessionId; channel.source_file_id = sourceFileId; channel.source_column = channelIndex;
+    channel.sampling_rate_hz = double(data.fs); channel.sample_count = size(data.signal, 1);
+    channel.time_start = double(data.time(1)); channel.time_end = double(data.time(end));
+    channel.enabled = true; channel.data_revision = lfp_data_version(struct('signal', data.signal(:,channelIndex), 'fs', data.fs, 'time', data.time, 'channelLabels', labels(channelIndex)));
+    channel.quality_status = "unassessed"; channel.source_metadata = struct('source_file_name', get_source(data, 'sourceFileName'), ...
+        'source_file_path', sourcePath, 'source_column', channelIndex, 'source_file_id', sourceFileId, ...
+        'source_file_fingerprint', sourceFingerprint);
     mapping = find_mapping(options.ChannelMapping, labels(channelIndex));
     for name = ["display_label" "side" "region" "contacts" "reference"]
         fieldName = char(name);
@@ -61,10 +75,24 @@ ref = struct('relative_path', relativeDataPath, 'source_path', sourcePath, ...
     'source_file_name', get_source(data, 'sourceFileName'), 'segment_id', "segment_1", ...
     'sample_count', size(data.signal,1), 'channel_count', size(data.signal,2), ...
     'fs', double(data.fs), 'time_start', double(data.time(1)), ...
-    'time_end', double(data.time(end)), 'channel_labels', labels);
+    'time_end', double(data.time(end)), 'channel_labels', labels, 'channel_ids', string({channels.channel_id})', ...
+    'cache_relative_paths', strings(numel(channels),1), 'source_file_id', sourceFileId, ...
+    'source_file_fingerprint', sourceFingerprint, 'import_config', get_field(get_field(data, 'metadata', struct()), 'importConfig', struct()), ...
+    'time_unit', 's', 'signal_unit', string(get_field(data, 'units', 'unknown')), 'imported_at', string(datestr(now,31)), 'cache_version', '1');
+% Keep a per-channel cache even for the canonical first import. This enables
+% later independent channel analysis without changing the legacy session MAT.
+for channelIndex = 1:numel(channels)
+    cachePaths(channelIndex,1) = lfp_project_save_channel_cache(project, session, channels(channelIndex), ...
+        double(data.time(:)), double(data.signal(:,channelIndex)), channels(channelIndex).source_metadata);
+    channels(channelIndex).cache_relative_path = cachePaths(channelIndex);
+    channelIds(channelIndex,1) = string(channels(channelIndex).channel_id);
+end
+ref.channel_ids = channelIds; ref.cache_relative_paths = cachePaths;
+session.channels = channels;
 session.data_refs = ref;
 session.status = "imported";
 project.subjects(subjectIndex).sessions(sessionIndex) = session;
+lfp_project_write_channel_manifest(project, session);
 if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session" && ...
         isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
     write_session_metadata(fullfile(string(project.rootPath), session.folder_relative_path), session);
