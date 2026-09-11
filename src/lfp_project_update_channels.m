@@ -17,6 +17,7 @@ if ~ismember('channel_id', channelRows.Properties.VariableNames)
 end
 channels = project.subjects(subjectIndex).sessions(sessionIndex).channels;
 editable = ["display_label" "side" "region" "contacts" "reference" "enabled" "quality_status"];
+enabledChanged = false;
 for row = 1:height(channelRows)
     index = find(string({channels.channel_id}) == string(channelRows.channel_id(row)), 1);
     if isempty(index), error('LFP:ChannelNotFound', 'Unknown channel ID: %s', string(channelRows.channel_id(row))); end
@@ -25,7 +26,10 @@ for row = 1:height(channelRows)
         if ismember(fieldName, channelRows.Properties.VariableNames)
             value = channelRows.(fieldName)(row);
             if strcmp(fieldName, 'enabled')
-                channels(index).enabled = logical(value);
+                newValue = logical(value); oldValue = true;
+                if isfield(channels(index),'enabled'), oldValue = logical(channels(index).enabled); end
+                enabledChanged = enabledChanged || (newValue ~= oldValue);
+                channels(index).enabled = newValue;
             else
                 channels(index).(fieldName) = string(value);
             end
@@ -33,6 +37,18 @@ for row = 1:height(channelRows)
     end
 end
 project.subjects(subjectIndex).sessions(sessionIndex).channels = channels;
+if enabledChanged && isfield(project,'analysisRuns') && ~isempty(project.analysisRuns)
+    for runIndex = 1:numel(project.analysisRuns)
+        if string(project.analysisRuns(runIndex).session_id) == sessionId
+            project.analysisRuns(runIndex).status = "stale_channels";
+            if ~isfield(project.analysisRuns(runIndex),'warnings') || isempty(project.analysisRuns(runIndex).warnings)
+                project.analysisRuns(runIndex).warnings = "Enabled-channel selection changed after this run.";
+            else
+                project.analysisRuns(runIndex).warnings(end+1,1) = "Enabled-channel selection changed after this run.";
+            end
+        end
+    end
+end
 lfp_project_write_channel_manifest(project, project.subjects(subjectIndex).sessions(sessionIndex));
 if options.Save, lfp_save_project(project); end
 end

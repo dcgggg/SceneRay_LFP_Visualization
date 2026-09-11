@@ -180,7 +180,7 @@ end
 
 function summary = empty_summary(ids)
 summary = repmat(struct('sessionId', "", 'status', "pending", 'runId', "", 'configId', "", ...
-    'errorMessage', "", 'errorIdentifier', "", 'warnings', strings(0,1)), numel(ids), 1);
+    'errorMessage', "", 'errorIdentifier', "", 'warnings', strings(0,1), 'summary', struct()), numel(ids), 1);
 for k=1:numel(ids), summary(k).sessionId=ids(k); end
 end
 

@@ -17,7 +17,7 @@ for index = numel(project.analysisRuns):-1:1
     resultPath = fullfile(string(project.rootPath), string(candidate.result_ref));
     if ~isfile(resultPath), continue; end
     [run, results] = lfp_load_analysis_run(project, string(candidate.run_id));
-    isCurrent = string(candidate.config_id) == targetId;
+    isCurrent = string(candidate.config_id) == targetId && ~startsWith(string(candidate.status), "stale");
     return;
 end
 end

@@ -17,27 +17,29 @@ end
 if isempty(session), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 configId = lfp_config_fingerprint(cfg);
 run = struct('run_id',lfp_make_id('run'),'session_id',sessionId,'input_data_version',string(session.data_version), ...
-    'channel_ids',string({session.channels.channel_id})','channel_labels',string({session.channels.original_label})', ...
+    'channel_ids',strings(0,1),'channel_labels',strings(0,1), ...
     'analysis_time_range',[NaN NaN],'config',cfg,'config_id',configId,'software_version',"SceneRay-LFP v"+string(cfg.version), ...
     'created_at',string(datestr(now,31)),'module_status',struct('artifact',"ok",'psd',"ok",'specparam',"ok",'band_power',"ok"), ...
     'result_ref',"",'summary',struct(),'status',"running",'warnings',strings(0,1),'channel_results',struct([]));
 channelResults = repmat(struct('channel_id',"",'channel_label',"",'status',"",'data_revision',"", ...
     'artifactResult',struct(),'psdResult',struct(),'modelResult',struct([]),'bandResult',struct(), ...
-    'warnings',strings(0,1),'result_ref',""),0,1);
+    'warnings',strings(0,1),'result_ref',"",'reused',false),0,1);
 enabledMask = true(1,numel(session.channels));
 for k=1:numel(session.channels)
     if isfield(session.channels(k),'enabled'), enabledMask(k)=logical(session.channels(k).enabled); end
 end
+run.channel_ids=string({session.channels(enabledMask).channel_id})'; run.channel_labels=string({session.channels(enabledMask).original_label})';
+reusedCount=0;
 for k=find(enabledMask)
     channel = session.channels(k);
     if ~isempty(options.ProgressCallback), options.ProgressCallback((k-1)/max(numel(session.channels),1), "Channel " + string(channel.original_label)); end
     one = struct('channel_id',string(channel.channel_id),'channel_label',string(channel.original_label),'status',"failed", ...
         'data_revision',string(get_field(channel,'data_revision',session.data_version)),'artifactResult',struct(), ...
-        'psdResult',struct(),'modelResult',struct([]),'bandResult',struct(),'warnings',strings(0,1),'result_ref',"");
+        'psdResult',struct(),'modelResult',struct([]),'bandResult',struct(),'warnings',strings(0,1),'result_ref',"",'reused',false);
     if ~options.Force
         cached = find_reusable_channel(project, sessionId, channel, configId);
         if ~isempty(cached)
-            one = cached; channelResults(end+1,1)=one; %#ok<AGROW>
+            one = cached; one.reused=true; reusedCount=reusedCount+1; channelResults(end+1,1)=one; %#ok<AGROW>
             continue;
         end
     end
@@ -59,11 +61,13 @@ for k=find(~enabledMask)
     channel=session.channels(k);
     channelResults(end+1,1)=struct('channel_id',string(channel.channel_id),'channel_label',string(channel.original_label), ...
         'status',"disabled",'data_revision',string(get_field(channel,'data_revision',session.data_version)),'artifactResult',struct(), ...
-        'psdResult',struct(),'modelResult',struct([]),'bandResult',struct(),'warnings',"Channel disabled by user.",'result_ref',""); %#ok<AGROW>
+        'psdResult',struct(),'modelResult',struct([]),'bandResult',struct(),'warnings',"Channel disabled by user.",'result_ref',"",'reused',false); %#ok<AGROW>
 end
 run.channel_results = rmfield(channelResults, {'artifactResult','psdResult','modelResult','bandResult'});
 run.summary = struct('channel_count',numel(session.channels),'enabled_channel_count',nnz(enabledMask), ...
-    'successful_channel_count',nnz(string({channelResults.status})=="ok"),'failed_channel_count',nnz(string({channelResults.status})=="failed"));
+    'successful_channel_count',nnz(ismember(string({channelResults.status}),["ok" "partial_failure"])),'reused_channel_count',reusedCount, ...
+    'failed_channel_count',nnz(string({channelResults.status})=="failed"),'disabled_channel_count',nnz(string({channelResults.status})=="disabled"), ...
+    'analysis_channel_ids',run.channel_ids);
 run.module_status = aggregate_status(channelResults, options.ComputeSpecparam, options.ComputeBandPower);
 run.status = aggregate_run_status(channelResults);
 run.result_ref = session_result_ref(project, session, run.run_id);
@@ -78,7 +82,7 @@ temp=resultPath+".tmp_"+lfp_make_id('result');cleanup=onCleanup(@()delete_if_pre
 project.analysisRuns(end+1)=normalize_run(run);
 project.subjects(si).sessions(ki).analysis_run_ids(end+1,1)=run.run_id;
 project.subjects(si).sessions(ki).status="analyzed";
-statusSummary=struct('sessionId',sessionId,'status',run.status,'runId',run.run_id,'configId',configId,'errorMessage',"",'errorIdentifier',"",'warnings',run.warnings);
+statusSummary=struct('sessionId',sessionId,'status',run.status,'runId',run.run_id,'configId',configId,'errorMessage',"",'errorIdentifier',"",'warnings',run.warnings,'summary',run.summary);
 if options.Save, lfp_save_project(project); end
 end
 
@@ -95,7 +99,7 @@ function path=session_result_ref(project,session,runId)
 if isfield(session,'folder_relative_path')&&strlength(string(session.folder_relative_path))>0, path=fullfile(string(session.folder_relative_path),'results',runId+'.mat'); else, path=fullfile('results',runId+'.mat'); end
 end
 function status=aggregate_run_status(results)
-states=string({results.status}); if isempty(states)||all(states=="disabled"), status="failed"; elseif any(states=="failed"), status="partial_failure"; else, status="ok"; end
+states=string({results.status}); if isempty(states)||all(states=="disabled"), status="failed"; elseif any(ismember(states,["failed" "partial_failure"])), status="partial_failure"; else, status="ok"; end
 end
 function status=aggregate_status(results,doSpec,doBand)
 states=string({results.status}); if any(states=="failed"), state="partial"; else, state="ok"; end
