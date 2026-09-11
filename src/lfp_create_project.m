@@ -7,6 +7,7 @@ function project = lfp_create_project(projectRoot, name, options)
 arguments
     projectRoot (1,1) string
     name (1,1) string = "LFP Project"
+    options.Description (1,1) string = ""
     options.Config (1,1) struct = struct()
     options.Save (1,1) logical = true
 end
@@ -16,9 +17,10 @@ if strlength(strtrim(projectRoot)) == 0
 end
 if ~isfolder(projectRoot), mkdir(projectRoot); end
 [project, ~, ~, ~, ~, ~] = lfp_project_schema();
-project.schema_version = 1;
+project.schema_version = 2;
 project.project_id = lfp_make_id("project");
 project.name = name;
+project.description = options.Description;
 project.rootPath = string(projectRoot);
 project.createdAt = string(datestr(now, 31));
 project.updatedAt = project.createdAt;

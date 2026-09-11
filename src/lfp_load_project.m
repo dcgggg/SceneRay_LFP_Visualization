@@ -40,6 +40,7 @@ project.comparisons = normalize_array(project.comparisons, comparisonTemplate);
 if ~isfield(project, 'defaultConfig') || isempty(fieldnames(project.defaultConfig))
     project.defaultConfig = lfpDefaultConfig();
 end
+project.schema_version = 2;
 end
 
 function array = normalize_array(array, template)

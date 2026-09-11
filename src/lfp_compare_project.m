@@ -26,6 +26,7 @@ comparison.metric = string(get_field(comparisonSpec, 'metric', "totalPower"));
 comparison.bands = string(get_field(comparisonSpec, 'bands', strings(0,1))); comparison.bands = comparison.bands(:);
 comparison.aggregation = string(get_field(comparisonSpec, 'aggregation', "session"));
 comparison.plot_settings = get_field(comparisonSpec, 'plot_settings', struct());
+comparison.channel_mapping = get_field(comparisonSpec, 'channel_mapping', struct([]));
 comparison.created_at = string(datestr(now, 31));
 cfg = project.defaultConfig; if ~isempty(fieldnames(options.Config)), cfg = options.Config; end
 targetConfigId = lfp_config_fingerprint(cfg); comparison.target_config_id = targetConfigId;
@@ -61,7 +62,8 @@ for index = 1:numel(runIds)
     session = find_session(project, run.session_id); subjectId = session.subject_id;
     comparison.subject_ids(end+1,1) = subjectId; %#ok<AGROW>
     if ~isfield(results, 'bandResult') || ~isstruct(results.bandResult) || ~isfield(results.bandResult, 'table'), continue; end
-    rows = append_band_rows(rows, results.bandResult.table, project, session, run, comparison.metric, comparison.bands);
+    rows = append_band_rows(rows, results.bandResult.table, session, run, comparison.metric, ...
+        comparison.bands, comparison.channel_mapping);
 end
 if numel(unique(configIds)) > 1
     comparison.status = "incompatible_parameters";
@@ -79,7 +81,7 @@ if options.Save
 end
 end
 
-function rows = append_band_rows(rows, tableData, project, session, run, metric, selectedBands)
+function rows = append_band_rows(rows, tableData, session, run, metric, selectedBands, channelMapping)
 if isempty(tableData), return; end
 if isempty(selectedBands), selectedBands = string(tableData.band); end
 for index = 1:height(tableData)
@@ -87,13 +89,34 @@ for index = 1:height(tableData)
     if ~ismember(metric, string(tableData.Properties.VariableNames)), continue; end
     channelIndex = tableData.channelIndex(index); channelId = ""; label = string(tableData.channelLabel(index));
     if channelIndex <= numel(session.channels), channelId = string(session.channels(channelIndex).channel_id); end
+    [include, targetLabel] = mapped_channel(channelMapping, session.session_id, channelId, label);
+    if ~include, continue; end
     value = tableData.(char(metric))(index);
     qc = "ok";
     if ismember('status', tableData.Properties.VariableNames), qc = string(tableData.status(index)); end
     one = table(string(session.subject_id), string(session.session_id), string(session.visit_label), ...
-        channelId, label, string(run.run_id), "", band, metric, value, metric_unit(metric, session), ...
+        channelId, targetLabel, string(run.run_id), "", band, metric, value, metric_unit(metric, session), ...
         "session", string(run.config_id), qc, 'VariableNames', rows.Properties.VariableNames);
     rows = [rows; one]; %#ok<AGROW>
+end
+
+function [include, targetLabel] = mapped_channel(mapping, sessionId, channelId, originalLabel)
+include = true; targetLabel = originalLabel;
+if isempty(mapping), return; end
+include = false;
+for index = 1:numel(mapping)
+    entry = mapping(index);
+    if isfield(entry, 'session_id') && string(entry.session_id) ~= string(sessionId), continue; end
+    idMatches = isfield(entry, 'channel_id') && strlength(string(entry.channel_id)) > 0 && string(entry.channel_id) == channelId;
+    labelMatches = isfield(entry, 'channel_label') && strlength(string(entry.channel_label)) > 0 && string(entry.channel_label) == originalLabel;
+    if idMatches || labelMatches
+        include = true;
+        if isfield(entry, 'target_label') && strlength(string(entry.target_label)) > 0
+            targetLabel = string(entry.target_label);
+        end
+        return;
+    end
+end
 end
 end
 

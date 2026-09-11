@@ -90,6 +90,46 @@ verifyTrue(testCase, any(string({batch.analysis.status}) == "ok" | string({batch
 verifyTrue(testCase, isfield(batch, 'outputFile') && isfile(batch.outputFile));
 end
 
+function testMetadataFirstSessionAndNonDestructiveRemoval(testCase)
+ensure_src_on_path(testCase);
+root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
+project = lfp_create_project(root, "Metadata workflow", Description="GUI managed project");
+[project, ~] = lfp_project_add_subject(project, struct('subject_id', "P01"));
+[project, emptySession] = lfp_project_add_empty_session(project, "P01", ...
+    struct('session_id', "P01_D07", 'visit_label', "Day07"));
+verifyEqual(testCase, string(emptySession.status), "no_data");
+[project, session] = lfp_project_attach_data(project, "P01_D07", fixture_data(4, 12, "day07.csv"));
+verifyEqual(testCase, string(session.status), "imported");
+rows = struct2table(session.channels);
+rows.display_label(1) = "Left STN 0-1"; rows.region(1) = "STN";
+[project, channels] = lfp_project_update_channels(project, "P01_D07", rows, Save=false);
+verifyEqual(testCase, string(channels(1).display_label), "Left STN 0-1");
+dataPath = fullfile(root, project.subjects(1).sessions(1).data_refs(1).relative_path);
+[project, impact] = lfp_project_remove_session(project, "P01_D07", Save=false);
+verifyEmpty(testCase, project.subjects(1).sessions);
+verifyTrue(testCase, isfile(dataPath));
+verifyEqual(testCase, impact.sessionId, "P01_D07");
+end
+
+function testComparisonChannelMappingFiltersRows(testCase)
+ensure_src_on_path(testCase);
+root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
+project = lfp_create_project(root, "Mapping project");
+[project, ~] = lfp_project_add_subject(project, struct('subject_id', "P01"));
+cfg = lfpDefaultConfig(); cfg.artifact.strictMode = false; cfg.psd.windowLengthSec = 1;
+project.defaultConfig = cfg;
+[project, ~] = lfp_project_add_session(project, "P01", fixture_data(8, 10, "a.csv"), struct('session_id', "S01"));
+[project, ~] = lfp_analyze_project(project, "S01", Config=cfg);
+session = project.subjects(1).sessions(1);
+mapping = struct('session_id', "S01", 'channel_id', string(session.channels(1).channel_id), ...
+    'channel_label', "", 'target_label', "Comparable STN");
+spec = struct('type', "custom", 'session_ids', "S01", 'bands', "alpha", ...
+    'metric', "totalPower", 'channel_mapping', mapping);
+[project, comparison] = lfp_compare_project(project, spec, Config=cfg);
+verifyEqual(testCase, height(comparison.result_table), 1);
+verifyEqual(testCase, string(comparison.result_table.channel_label), "Comparable STN");
+end
+
 function testSpecparamFailureDoesNotBlockOrdinaryBandPower(testCase)
 ensure_src_on_path(testCase);
 root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
