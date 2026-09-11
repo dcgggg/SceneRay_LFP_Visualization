@@ -1,9 +1,10 @@
 function [project, session] = lfp_project_add_session(project, subjectId, data, sessionInfo, options)
 %LFP_PROJECT_ADD_SESSION Add one imported record as a Session.
 %   DATA must be a standard LFP struct with samples-by-channels signal.
-%   The raw DATA is stored in project/data/<session_id>.mat; the Project
-%   index stores only metadata and a relative data reference.  No samples
-%   are cropped, padded, interpolated, or concatenated.
+%   The raw DATA is stored in a per-Session file for nested projects (or in
+%   the legacy project/data/<session_id>.mat layout); the Project index
+%   stores only metadata and a relative data reference. No samples are
+%   cropped, padded, interpolated, or concatenated.
 
 arguments
     project (1,1) struct

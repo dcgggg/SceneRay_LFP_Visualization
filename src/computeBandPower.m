@@ -7,16 +7,20 @@ function bandResult = computeBandPower(psdResult, modelResult, bandsCfg)
 arguments
     psdResult (1,1) struct
     modelResult struct
-    bandsCfg (1,1) struct
+    bandsCfg struct
 end
 if ~isfield(psdResult, 'frequencyHz') || ~isfield(psdResult, 'psd')
     error('LFP:InvalidSpectrum', 'psdResult.frequencyHz and psdResult.psd are required.');
 end
-bands = struct('name', {}, 'rangeHz', {});
-names = fieldnames(bandsCfg);
-for index = 1:numel(names)
-    bands(index).name = string(names{index});
-    bands(index).rangeHz = bandsCfg.(names{index});
+if isstruct(bandsCfg) && numel(bandsCfg) > 0 && isfield(bandsCfg, 'name') && isfield(bandsCfg, 'rangeHz')
+    bands = bandsCfg;
+else
+    bands = struct('name', {}, 'rangeHz', {});
+    names = fieldnames(bandsCfg);
+    for index = 1:numel(names)
+        bands(index).name = string(names{index});
+        bands(index).rangeHz = bandsCfg.(names{index});
+    end
 end
 nChannels = size(psdResult.psd, 2);
 labels = get_field(psdResult, 'channelLabels', "channel_" + string(1:nChannels));

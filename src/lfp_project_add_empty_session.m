@@ -25,11 +25,38 @@ session.medication_state = get_string(sessionInfo, 'medication_state', "");
 session.stimulation_state = get_string(sessionInfo, 'stimulation_state', "");
 session.repeat_label = get_string(sessionInfo, 'repeat_label', "");
 session.notes = get_string(sessionInfo, 'notes', "");
+session.folder_relative_path = "";
 session.status = "no_data";
 if session_exists(project, session.session_id)
     error('LFP:DuplicateSession', 'Session ID already exists in this project: %s', session.session_id);
 end
 project.subjects(subjectIndex).sessions(end + 1) = session;
+if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session"
+    subject = project.subjects(subjectIndex);
+    if strlength(string(subject.folder_relative_path)) == 0
+        subjectFolder = lfp_project_folder_name(subject.display_name, subject.subject_id, "被试");
+        subject.folder_relative_path = fullfile(string(project.paths.subjects), subjectFolder);
+        project.subjects(subjectIndex).folder_relative_path = subject.folder_relative_path;
+    end
+    folderLabel = session.visit_label;
+    if strlength(folderLabel) == 0, folderLabel = session.session_id; end
+    folderName = lfp_project_folder_name(folderLabel, session.session_id, "Session");
+    session.folder_relative_path = fullfile(subject.folder_relative_path, folderName);
+    if ~isempty(project.subjects(subjectIndex).sessions(1:end-1)) && ...
+            any(string({project.subjects(subjectIndex).sessions(1:end-1).folder_relative_path}) == session.folder_relative_path)
+        error('LFP:DuplicateSessionFolder', 'Session文件夹名称已存在：%s。', session.folder_relative_path);
+    end
+    subjectFolder = fullfile(string(project.rootPath), subject.folder_relative_path);
+    sessionFolder = fullfile(string(project.rootPath), session.folder_relative_path);
+    if ~isfolder(subjectFolder) && ~mkdir(subjectFolder), error('LFP:SubjectFolderCreateFailed', '无法创建被试文件夹：%s。', subjectFolder); end
+    if isfolder(sessionFolder) || isfile(sessionFolder), error('LFP:SessionFolderExists', 'Session文件夹已存在：%s。', sessionFolder); end
+    if ~mkdir(sessionFolder), error('LFP:SessionFolderCreateFailed', '无法创建Session文件夹：%s。', sessionFolder); end
+    for directory = ["data" "configs" "results" "exports"]
+        if ~mkdir(fullfile(sessionFolder, directory)), error('LFP:SessionSubfolderCreateFailed', '无法创建Session子目录：%s。', directory); end
+    end
+    project.subjects(subjectIndex).sessions(end).folder_relative_path = session.folder_relative_path;
+    write_session_metadata(sessionFolder, project.subjects(subjectIndex).sessions(end));
+end
 if options.Save, lfp_save_project(project); end
 end
 
@@ -52,4 +79,9 @@ end
 function value = get_string(source, name, fallback)
 if isfield(source, name) && ~isempty(source.(name)), value = string(source.(name));
 else, value = string(fallback); end
+end
+
+function write_session_metadata(folder, session)
+sessionMetadata = session; %#ok<NASGU>
+save(fullfile(folder, 'session.mat'), 'sessionMetadata', '-v7');
 end

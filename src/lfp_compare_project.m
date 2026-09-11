@@ -27,6 +27,8 @@ comparison.bands = string(get_field(comparisonSpec, 'bands', strings(0,1))); com
 comparison.aggregation = string(get_field(comparisonSpec, 'aggregation', "session"));
 comparison.plot_settings = get_field(comparisonSpec, 'plot_settings', struct());
 comparison.channel_mapping = get_field(comparisonSpec, 'channel_mapping', struct([]));
+comparison.grouping_basis = string(get_field(comparisonSpec, 'grouping_basis', "custom"));
+comparison.group_defs = get_field(comparisonSpec, 'group_defs', struct([]));
 comparison.created_at = string(datestr(now, 31));
 cfg = project.defaultConfig; if ~isempty(fieldnames(options.Config)), cfg = options.Config; end
 targetConfigId = lfp_config_fingerprint(cfg); comparison.target_config_id = targetConfigId;
@@ -53,27 +55,39 @@ else
 end
 comparison.run_ids = runIds;
 comparison.subject_ids = strings(0,1);
+comparison.session_count = nnz(strlength(runIds) > 0);
 rows = empty_long_table();
 configIds = strings(0,1);
 for index = 1:numel(runIds)
     if strlength(runIds(index)) == 0, continue; end
     [run, results] = lfp_load_analysis_run(project, runIds(index));
     configIds(end+1,1) = string(run.config_id); %#ok<AGROW>
-    session = find_session(project, run.session_id); subjectId = session.subject_id;
+    [session, subject] = find_session(project, run.session_id); subjectId = session.subject_id;
+    session.subject_group = string(subject.group);
     comparison.subject_ids(end+1,1) = subjectId; %#ok<AGROW>
     if ~isfield(results, 'bandResult') || ~isstruct(results.bandResult) || ~isfield(results.bandResult, 'table'), continue; end
     rows = append_band_rows(rows, results.bandResult.table, session, run, comparison.metric, ...
-        comparison.bands, comparison.channel_mapping);
+        comparison.bands, comparison.channel_mapping, comparison.grouping_basis);
 end
 if numel(unique(configIds)) > 1
     comparison.status = "incompatible_parameters";
     comparison.warnings(end+1,1) = "选定结果的计算配置不一致；请统一参数后再比较。";
 end
 comparison.result_table = rows;
+comparison.subject_ids = unique(comparison.subject_ids, 'stable');
+comparison.subject_count = numel(comparison.subject_ids);
+if isempty(comparison.group_defs)
+    comparison.group_defs = infer_group_defs(project, comparison.session_ids, comparison.channel_mapping, comparison.grouping_basis);
+end
+comparison.psd_summary = lfp_build_psd_comparison(project, runIds, comparison.channel_mapping, comparison.group_defs);
 if options.Save
     if ~isfield(project, 'comparisons') || isempty(project.comparisons), project.comparisons = template([]); end
     project.comparisons(end+1) = comparison;
-    target = fullfile(string(project.rootPath), "comparisons", comparison.comparison_id + ".mat");
+    comparisonFolder = "comparisons";
+    if isfield(project,'paths') && isfield(project.paths,'comparisons') && strlength(string(project.paths.comparisons))>0
+        comparisonFolder=string(project.paths.comparisons);
+    end
+    target = fullfile(string(project.rootPath), comparisonFolder, comparison.comparison_id + ".mat");
     if ~isfolder(fileparts(target)), mkdir(fileparts(target)); end
     savedComparison = comparison; %#ok<NASGU>
     save(target, 'savedComparison', '-v7');
@@ -81,7 +95,7 @@ if options.Save
 end
 end
 
-function rows = append_band_rows(rows, tableData, session, run, metric, selectedBands, channelMapping)
+function rows = append_band_rows(rows, tableData, session, run, metric, selectedBands, channelMapping, groupingBasis)
 if isempty(tableData), return; end
 if isempty(selectedBands), selectedBands = string(tableData.band); end
 for index = 1:height(tableData)
@@ -89,19 +103,21 @@ for index = 1:height(tableData)
     if ~ismember(metric, string(tableData.Properties.VariableNames)), continue; end
     channelIndex = tableData.channelIndex(index); channelId = ""; label = string(tableData.channelLabel(index));
     if channelIndex <= numel(session.channels), channelId = string(session.channels(channelIndex).channel_id); end
-    [include, targetLabel] = mapped_channel(channelMapping, session.session_id, channelId, label);
+    [include, targetLabel, groupLabel] = mapped_channel(channelMapping, session.session_id, channelId, label);
     if ~include, continue; end
+    if strlength(groupLabel) == 0, groupLabel = default_group_label(session, groupingBasis); end
     value = tableData.(char(metric))(index);
     qc = "ok";
     if ismember('status', tableData.Properties.VariableNames), qc = string(tableData.status(index)); end
     one = table(string(session.subject_id), string(session.session_id), string(session.visit_label), ...
         channelId, targetLabel, string(run.run_id), "", band, metric, value, metric_unit(metric, session), ...
-        "session", string(run.config_id), qc, 'VariableNames', rows.Properties.VariableNames);
+        "session", string(run.config_id), qc, groupLabel, default_subject_group(session), ...
+        'VariableNames', rows.Properties.VariableNames);
     rows = [rows; one]; %#ok<AGROW>
 end
 
-function [include, targetLabel] = mapped_channel(mapping, sessionId, channelId, originalLabel)
-include = true; targetLabel = originalLabel;
+function [include, targetLabel, groupLabel] = mapped_channel(mapping, sessionId, channelId, originalLabel)
+include = true; targetLabel = originalLabel; groupLabel = "";
 if isempty(mapping), return; end
 include = false;
 % This helper is nested in append_band_rows.  Do not reuse the parent's
@@ -116,6 +132,7 @@ for mappingIndex = 1:numel(mapping)
         if isfield(entry, 'target_label') && strlength(string(entry.target_label)) > 0
             targetLabel = string(entry.target_label);
         end
+        if isfield(entry, 'group_label'), groupLabel = string(entry.group_label); end
         return;
     end
 end
@@ -137,17 +154,86 @@ end
 
 function rows = empty_long_table()
 names = {'subject_id','session_id','visit_label','channel_id','channel_label', ...
-    'run_id','epoch_id','band','metric','value','unit','aggregation','config_id','qc_status'};
+    'run_id','epoch_id','band','metric','value','unit','aggregation','config_id','qc_status', ...
+    'group_label','subject_group'};
 types = {'string','string','string','string','string','string','string','string', ...
-    'string','double','string','string','string','string'};
+    'string','double','string','string','string','string','string','string'};
 rows = table('Size', [0 numel(names)], 'VariableTypes', types, 'VariableNames', names);
 end
 
-function session = find_session(project, sessionId)
-session = [];
+function value = default_group_label(session, groupingBasis)
+switch lower(string(groupingBasis))
+    case "subject_group", value = default_subject_group(session);
+    case "visit", value = string(session.visit_label);
+    otherwise, value = "Group 1";
+end
+if strlength(value) == 0, value = "未分组"; end
+end
+
+function value = default_subject_group(session)
+value = "";
+if isfield(session, 'subject_group'), value = string(session.subject_group); end
+% The caller supplies only Session metadata; subject group is filled by the
+% explicit mapping in the GUI or falls back to the visit/custom label.
+if strlength(value) == 0, value = "未分组"; end
+end
+
+function defs = infer_group_defs(project, sessionIds, mapping, groupingBasis)
+labels = strings(0,1);
+for k = 1:numel(sessionIds)
+    [session,subject] = find_session(project, sessionIds(k));
+    if isempty(session), continue; end
+    label = "";
+    for m = 1:numel(mapping)
+        if isfield(mapping(m), 'session_id') && string(mapping(m).session_id) == string(session.session_id) && isfield(mapping(m), 'group_label')
+            label = string(mapping(m).group_label); break;
+        end
+    end
+    if strlength(label) == 0
+        switch lower(string(groupingBasis))
+            case "subject_group", label = string(subject.group);
+            case "visit", label = string(session.visit_label);
+            otherwise, label = "Group 1";
+        end
+    end
+    if strlength(label) == 0, label = "未分组"; end
+    labels(end+1,1) = label; %#ok<AGROW>
+end
+labels = unique(labels, 'stable');
+defs = repmat(struct('group_label', "", 'basis', string(groupingBasis), ...
+    'session_ids', strings(0,1), 'subject_ids', strings(0,1)), numel(labels), 1);
+for k = 1:numel(labels)
+    defs(k).group_label = labels(k);
+    mask = false(numel(sessionIds),1);
+    for sessionIndex = 1:numel(sessionIds)
+        [session,subject] = find_session(project, sessionIds(sessionIndex));
+        if isempty(session), continue; end
+        label = "";
+        for mappingIndex = 1:numel(mapping)
+            if isfield(mapping(mappingIndex), 'session_id') && string(mapping(mappingIndex).session_id) == string(session.session_id) && isfield(mapping(mappingIndex), 'group_label')
+                label = string(mapping(mappingIndex).group_label); break;
+            end
+        end
+        if strlength(label) == 0
+            switch lower(string(groupingBasis)), case "subject_group", label=string(subject.group); case "visit", label=string(session.visit_label); otherwise, label="Group 1"; end
+        end
+        if strlength(label)==0, label="未分组"; end
+        mask(sessionIndex)=label==labels(k);
+    end
+    defs(k).session_ids = string(sessionIds(mask));
+    subjectIds = strings(0,1);
+    for sessionIndex = find(mask(:))'
+        [~,subject] = find_session(project, sessionIds(sessionIndex)); if ~isempty(subject), subjectIds(end+1,1)=string(subject.subject_id); end %#ok<AGROW>
+    end
+    defs(k).subject_ids = unique(subjectIds, 'stable');
+end
+end
+
+function [session, subject] = find_session(project, sessionId)
+session = []; subject = [];
 for s=1:numel(project.subjects)
     idx=find(string({project.subjects(s).sessions.session_id})==string(sessionId),1);
-    if ~isempty(idx), session=project.subjects(s).sessions(idx); return; end
+        if ~isempty(idx), session=project.subjects(s).sessions(idx); subject=project.subjects(s); return; end
 end
 end
 

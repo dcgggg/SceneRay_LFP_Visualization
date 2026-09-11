@@ -130,6 +130,29 @@ verifyEqual(testCase, height(comparison.result_table), 1);
 verifyEqual(testCase, string(comparison.result_table.channel_label), "Comparable STN");
 end
 
+function testGroupedPsdAndBandComparisonsUseSubjectWeighting(testCase)
+ensure_src_on_path(testCase);
+root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
+project = lfp_create_project(root, "Grouped project");
+[project, ~] = lfp_project_add_subject(project, struct('subject_id', "P01", 'group', "Control"));
+[project, ~] = lfp_project_add_subject(project, struct('subject_id', "P02", 'group', "Treatment"));
+cfg = lfpDefaultConfig(); cfg.artifact.strictMode = false; cfg.psd.windowLengthSec = 1; cfg.psd.frequencyRange = [1 35]; project.defaultConfig = cfg;
+[project, s1] = lfp_project_add_session(project, "P01", fixture_data(4, 10, "p01.csv"), struct('session_id', "P01_B", 'visit_label', "Baseline"));
+[project, s2] = lfp_project_add_session(project, "P02", fixture_data(4, 12, "p02.csv"), struct('session_id', "P02_B", 'visit_label', "Baseline"));
+[project, ~] = lfp_analyze_project(project, [s1.session_id s2.session_id], Config=cfg);
+mapping(1) = struct('session_id', s1.session_id, 'channel_id', s1.channels(1).channel_id, 'channel_label', "", 'target_label', "STN", 'group_label', "Control");
+mapping(2) = struct('session_id', s2.session_id, 'channel_id', s2.channels(1).channel_id, 'channel_label', "", 'target_label', "STN", 'group_label', "Treatment");
+spec = struct('type', "between_subjects", 'session_ids', [s1.session_id s2.session_id], 'bands', "alpha", ...
+    'metric', "totalPower", 'channel_mapping', mapping, 'grouping_basis', "custom");
+[~, comparison] = lfp_compare_project(project, spec, Config=cfg);
+verifyEqual(testCase, string(comparison.psd_summary.status), "ok");
+verifyEqual(testCase, numel(comparison.psd_summary.group_labels_unique), 2);
+verifyEqual(testCase, string(comparison.result_table.group_label), ["Control"; "Treatment"]);
+h1 = plotGroupedPsdComparison(comparison.psd_summary, Visible="off"); testCase.addTeardown(@() close_if_valid(h1.figure));
+h2 = plotGroupedBandPower(comparison, Visible="off"); testCase.addTeardown(@() close_if_valid(h2.figure));
+verifyTrue(testCase, isgraphics(h1.axes)); verifyTrue(testCase, isgraphics(h2.axes));
+end
+
 function testSpecparamFailureDoesNotBlockOrdinaryBandPower(testCase)
 ensure_src_on_path(testCase);
 root = string(tempname); mkdir(root); testCase.addTeardown(@() cleanup(root));
@@ -148,6 +171,42 @@ second = first; second.psd.frequencyRange = [1 30];
 third = first; third.plot.frequencyRange = [1 20];
 verifyNotEqual(testCase, lfp_config_fingerprint(first), lfp_config_fingerprint(second));
 verifyEqual(testCase, lfp_config_fingerprint(first), lfp_config_fingerprint(third));
+end
+
+function testProjectParentCreatesNestedStorageAndRelocates(testCase)
+ensure_src_on_path(testCase);
+parent = string(tempname); mkdir(parent); testCase.addTeardown(@() cleanup(parent));
+[project, projectRoot] = lfp_create_project_in_parent(parent, "DBS Study");
+verifyEqual(testCase, string(project.storage_mode), "subject_session");
+verifyTrue(testCase, isfile(fullfile(projectRoot, "project.mat")));
+verifyTrue(testCase, isfolder(fullfile(projectRoot, "subjects")));
+verifyError(testCase, @()lfp_create_project_in_parent(parent, "DBS/Study"), 'LFP:InvalidFolderName');
+mkdir(fullfile(parent, "Existing"));
+verifyError(testCase, @()lfp_create_project_in_parent(parent, "Existing"), 'LFP:ProjectFolderExists');
+[project, subject] = lfp_project_add_subject(project, struct('subject_id', "P01", 'display_name', "Patient 01"));
+subjectFolder = fullfile(projectRoot, subject.folder_relative_path);
+verifyTrue(testCase, isfolder(subjectFolder)); verifyTrue(testCase, isfile(fullfile(subjectFolder, "subject.mat")));
+[project, session] = lfp_project_add_empty_session(project, "P01", struct('session_id', "S01", 'visit_label', "Baseline"));
+sessionFolder = fullfile(projectRoot, session.folder_relative_path);
+verifyTrue(testCase, isfolder(fullfile(sessionFolder, "data")));
+source = fullfile(parent, "source.csv"); t=(0:99)'/100; writetable(table(t,sin(2*pi*10*t),'VariableNames',{'time','channel01'}),source);
+data = struct('signal', sin(2*pi*10*t), 'time', t, 'fs', 100, 'channelLabels', "channel01", 'units', "uV", ...
+    'metadata', struct('sourceFilePath', source, 'sourceFileName', "source.csv"));
+[project, session] = lfp_project_attach_data(project, "S01", data, Save=false);
+stored = fullfile(projectRoot, session.data_refs(1).relative_path);
+copied = fullfile(projectRoot, session.data_refs(1).project_copy_relative_path);
+verifyTrue(testCase, isfile(stored)); verifyTrue(testCase, isfile(copied)); verifyTrue(testCase, isfile(source));
+[project, ~] = lfp_project_update_subject(project, "P01", struct('display_name', "Patient Renamed"), Save=false);
+newSubjectFolder = fullfile(projectRoot, project.subjects(1).folder_relative_path);
+verifyTrue(testCase, isfolder(newSubjectFolder)); verifyFalse(testCase, isfolder(subjectFolder));
+[project, session] = lfp_project_update_session(project, "S01", struct('visit_label', "Post"), Save=false);
+newSessionFolder = fullfile(projectRoot, session.folder_relative_path);
+verifyTrue(testCase, isfolder(newSessionFolder)); verifyFalse(testCase, isfolder(sessionFolder));
+verifyTrue(testCase, isfile(fullfile(projectRoot, session.data_refs(1).relative_path)));
+lfp_save_project(project);
+movedRoot = fullfile(parent, "MovedStudy"); movefile(projectRoot, movedRoot);
+reopened = lfp_load_project(movedRoot); [reopenedData, ~] = lfp_project_get_session_data(reopened, "S01");
+verifyEqual(testCase, reopenedData.signal, data.signal); verifyEqual(testCase, string(reopened.rootPath), movedRoot);
 end
 
 function data = fixture_data(seconds, frequency, fileName)

@@ -16,8 +16,10 @@ if strlength(strtrim(projectRoot)) == 0
     error('LFP:InvalidProjectRoot', 'Project root must not be empty.');
 end
 if ~isfolder(projectRoot), mkdir(projectRoot); end
+name = lfp_validate_folder_name(name, "项目名称");
 [project, ~, ~, ~, ~, ~] = lfp_project_schema();
-project.schema_version = 2;
+project.schema_version = 3;
+project.storage_mode = "legacy_root";
 project.project_id = lfp_make_id("project");
 project.name = name;
 project.description = options.Description;
@@ -26,7 +28,7 @@ project.createdAt = string(datestr(now, 31));
 project.updatedAt = project.createdAt;
 if isempty(fieldnames(options.Config)), project.defaultConfig = lfpDefaultConfig();
 else, project.defaultConfig = options.Config; end
-for field = {'data', 'results', 'comparisons'}
+for field = {'data', 'results', 'comparisons', 'subjects', 'exports', 'logs'}
     folder = fullfile(projectRoot, project.paths.(field{1}));
     if ~isfolder(folder), mkdir(folder); end
 end

@@ -73,12 +73,18 @@ for index = 1:numel(sessionIds)
             'sample_count', size(data.signal, 1), 'frequency_count', numel(psdResult.frequencyHz), ...
             'specparam_peak_counts', peak_counts(modelResult), ...
             'band_power_rows', get_band_rows(bandResult));
-        run.result_ref = fullfile("results", run.run_id + ".mat");
+        if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session" && ...
+                isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
+            run.result_ref = fullfile(string(session.folder_relative_path), "results", run.run_id + ".mat");
+        else
+            % Legacy projects retain the root-level results layout.
+            run.result_ref = fullfile("results", run.run_id + ".mat");
+        end
         payload = struct('run', run, 'artifactResult', artifactResult, ...
             'psdResult', psdResult, 'modelResult', modelResult, ...
             'bandResult', bandResult, 'metadata', data.metadata, ...
             'processingHistory', get_field(data, 'processingHistory', struct()));
-        resultPath = fullfile(string(project.rootPath), "results", run.run_id + ".mat");
+        resultPath = fullfile(string(project.rootPath), run.result_ref);
         if ~isfolder(fileparts(resultPath)), mkdir(fileparts(resultPath)); end
         tempPath = resultPath + ".tmp_" + lfp_make_id("result");
         cleanup = onCleanup(@() delete_if_present(tempPath)); %#ok<NASGU>

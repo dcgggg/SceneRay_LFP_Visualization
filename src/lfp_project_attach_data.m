@@ -40,7 +40,13 @@ for channelIndex = 1:size(data.signal, 2)
 end
 session.channels = channels;
 session.data_version = lfp_data_version(data);
-relativeDataPath = fullfile("data", session.session_id + ".mat");
+if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session" && ...
+        isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
+    relativeDataPath = fullfile(string(session.folder_relative_path), "data", "session_data.mat");
+else
+    % Legacy sessions retain their existing root-level data layout.
+    relativeDataPath = fullfile("data", session.session_id + ".mat");
+end
 absoluteDataPath = fullfile(string(project.rootPath), relativeDataPath);
 if ~isfolder(fileparts(absoluteDataPath)), mkdir(fileparts(absoluteDataPath)); end
 payload = struct('data', data, 'session_id', session.session_id, ...
@@ -48,7 +54,10 @@ payload = struct('data', data, 'session_id', session.session_id, ...
 tempFile = absoluteDataPath + ".tmp_" + lfp_make_id("data");
 cleanup = onCleanup(@() delete_if_present(tempFile)); %#ok<NASGU>
 save(tempFile, 'payload', '-v7'); movefile(tempFile, absoluteDataPath, 'f');
-ref = struct('relative_path', relativeDataPath, 'source_path', get_source(data, 'sourceFilePath'), ...
+sourcePath = get_source(data, 'sourceFilePath');
+projectCopyPath = copy_source_file(project, session, sourcePath);
+ref = struct('relative_path', relativeDataPath, 'source_path', sourcePath, ...
+    'project_copy_relative_path', projectCopyPath, ...
     'source_file_name', get_source(data, 'sourceFileName'), 'segment_id', "segment_1", ...
     'sample_count', size(data.signal,1), 'channel_count', size(data.signal,2), ...
     'fs', double(data.fs), 'time_start', double(data.time(1)), ...
@@ -56,6 +65,10 @@ ref = struct('relative_path', relativeDataPath, 'source_path', get_source(data, 
 session.data_refs = ref;
 session.status = "imported";
 project.subjects(subjectIndex).sessions(sessionIndex) = session;
+if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session" && ...
+        isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
+    write_session_metadata(fullfile(string(project.rootPath), session.folder_relative_path), session);
+end
 if options.Save, lfp_save_project(project); end
 end
 
@@ -107,6 +120,34 @@ value = "";
 if isfield(data, 'metadata') && isstruct(data.metadata) && isfield(data.metadata, name)
     value = string(data.metadata.(name));
 end
+end
+
+function relativePath = copy_source_file(project, session, sourcePath)
+relativePath = "";
+if strlength(string(sourcePath)) == 0 || ~isfile(sourcePath) || ...
+        ~isfield(session, 'folder_relative_path') || strlength(string(session.folder_relative_path)) == 0
+    return;
+end
+targetFolder = fullfile(string(project.rootPath), string(session.folder_relative_path), "data");
+if ~isfolder(targetFolder), mkdir(targetFolder); end
+[~, base, ext] = fileparts(char(sourcePath));
+targetName = string(base) + string(ext);
+target = fullfile(targetFolder, targetName);
+suffix = 1;
+while isfile(target)
+    targetName = string(base) + "_" + string(suffix) + string(ext);
+    target = fullfile(targetFolder, targetName); suffix = suffix + 1;
+end
+if ~copyfile(sourcePath, target, 'f')
+    error('LFP:SourceCopyFailed', '无法复制源 CSV 到 Session/data：%s。', sourcePath);
+end
+relativePath = string(fullfile(string(session.folder_relative_path), "data", targetName));
+end
+
+function write_session_metadata(folder, session)
+if ~isfolder(folder), mkdir(folder); end
+sessionMetadata = session; %#ok<NASGU>
+save(fullfile(folder, 'session.mat'), 'sessionMetadata', '-v7');
 end
 
 function delete_if_present(path)

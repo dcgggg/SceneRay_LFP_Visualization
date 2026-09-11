@@ -37,10 +37,19 @@ for s = 1:numel(project.subjects)
 end
 project.analysisRuns = normalize_array(project.analysisRuns, runTemplate);
 project.comparisons = normalize_array(project.comparisons, comparisonTemplate);
+% New projects store Session data below subjects/<display>__<stable-id>.
+% Legacy projects intentionally keep empty folder fields and continue using
+% their existing relative data/result references.
+pathNames = fieldnames(template.paths);
+for pathIndex = 1:numel(pathNames)
+    if ~isfield(project.paths, pathNames{pathIndex})
+        project.paths.(pathNames{pathIndex}) = template.paths.(pathNames{pathIndex});
+    end
+end
 if ~isfield(project, 'defaultConfig') || isempty(fieldnames(project.defaultConfig))
     project.defaultConfig = lfpDefaultConfig();
 end
-project.schema_version = 2;
+project.schema_version = max(double(project.schema_version), 3);
 end
 
 function array = normalize_array(array, template)
