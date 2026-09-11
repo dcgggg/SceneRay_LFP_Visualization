@@ -17,6 +17,9 @@ classdef LfpProjectApp < handle
         Busy = false
         CancelRequested = false
         ClosingRequested = false
+        CompactMode = false
+        NavigationOnly = false
+        NavigationCollapsed = false
         LogMessages = strings(0,1)
     end
 
@@ -82,6 +85,23 @@ classdef LfpProjectApp < handle
             app.CurrentSessionId=string(sessionId); app.markDirty(); app.refreshProject(); app.selectSession(app.CurrentSessionId);
         end
 
+        function [data,importInfo]=importCsvToSession(app,sessionId,path,settings)
+            %IMPORTCSVTOSESSION Non-interactive bridge used by the GUI dialog
+            % and automated GUI workflows after import settings are confirmed.
+            arguments
+                app
+                sessionId (1,1) string
+                path (1,1) string
+                settings (1,1) struct
+            end
+            [session,~]=lfp_project_find_session(app.Project,sessionId);
+            if isempty(session),error('LFP:SessionNotFound','Session ID not found: %s',sessionId);end
+            if ~isempty(session.data_refs),error('LFP:SessionHasData','Session %s already has data.',sessionId);end
+            args=namedargs2cell(settings);[data,importInfo]=lfp_import_csv_configured(path,args{:});
+            app.attachDataToSession(sessionId,data);
+            app.setStatus('就绪',sprintf('已导入 %d 通道、%d 样本。',size(data.signal,2),size(data.signal,1)),0);
+        end
+
         function selectSession(app,sessionId)
             [session,subject]=lfp_project_find_session(app.Project,string(sessionId));
             if isempty(session), return; end
@@ -130,17 +150,20 @@ classdef LfpProjectApp < handle
     methods (Access=private)
         function buildUi(app,visible)
             app.Figure=uifigure('Name','SceneRay LFP 项目分析','Visible',char(visible), ...
-                'Position',[80 60 1500 900],'CloseRequestFcn',@(~,~)app.close(false));
-            root=uigridlayout(app.Figure,[3 1]);root.RowHeight={54,'1x',32};root.Padding=[8 8 8 8];root.RowSpacing=6;
-            app.buildToolbar(root);body=uigridlayout(root,[1 2]);body.Layout.Row=2;body.ColumnWidth={285,'1x'};body.Padding=[0 0 0 0];body.ColumnSpacing=8;
-            app.buildNavigation(body);app.buildWorkspace(body);app.buildStatusbar(root);
+                'Position',[80 60 1500 900],'CloseRequestFcn',@(~,~)app.close(false), ...
+                'AutoResizeChildren','off','SizeChangedFcn',@(~,~)app.applyResponsiveLayout());
+            host=uipanel(app.Figure,'BorderType','none','Units','pixels','Position',[1 1 1500 900]);app.Controls.HostPanel=host;
+            root=uigridlayout(host,[3 1]);app.Controls.RootGrid=root;root.RowHeight={54,'1x',32};root.Padding=[8 8 8 8];root.RowSpacing=6;
+            app.buildToolbar(root);body=uigridlayout(root,[1 2]);body.Layout.Row=2;body.ColumnWidth={285,'1x'};body.Padding=[0 0 0 0];body.ColumnSpacing=8;app.Controls.BodyGrid=body;
+            app.buildNavigation(body);app.buildWorkspace(body);app.buildStatusbar(root);app.applyResponsiveLayout();
         end
 
         function buildToolbar(app,parent)
-            bar=uipanel(parent,'BorderType','none');bar.Layout.Row=1;g=uigridlayout(bar,[1 8]);g.ColumnWidth={108,108,108,16,'1x',120,100,100};g.Padding=[4 4 4 4];
+            bar=uipanel(parent,'BorderType','none');bar.Layout.Row=1;g=uigridlayout(bar,[1 9]);g.ColumnWidth={108,108,108,82,16,'1x',120,100,100};g.Padding=[4 4 4 4];
             app.Controls.NewProject=uibutton(g,'Text','新建项目','ButtonPushedFcn',@(~,~)app.newProjectDialog());
             app.Controls.OpenProject=uibutton(g,'Text','打开项目','ButtonPushedFcn',@(~,~)app.openProjectDialog());
             app.Controls.SaveProject=uibutton(g,'Text','保存项目','Enable','off','ButtonPushedFcn',@(~,~)app.saveProject());
+            app.Controls.ToggleNavigation=uibutton(g,'Text','收起导航','ButtonPushedFcn',@(~,~)app.toggleNavigation());
             uilabel(g,'Text','');app.Controls.ProjectTitle=uilabel(g,'Text','未打开项目','FontWeight','bold','HorizontalAlignment','center');
             app.Controls.SaveState=uilabel(g,'Text','—','HorizontalAlignment','center');
             app.Controls.ShowLog=uibutton(g,'Text','查看日志','ButtonPushedFcn',@(~,~)app.showLog());
@@ -148,7 +171,7 @@ classdef LfpProjectApp < handle
         end
 
         function buildNavigation(app,parent)
-            panel=uipanel(parent,'Title','项目导航');panel.Layout.Column=1;g=uigridlayout(panel,[3 1]);g.RowHeight={'1x',36,54};g.Padding=[6 6 6 6];
+            panel=uipanel(parent,'Title','项目导航');panel.Layout.Column=1;app.Controls.NavigationPanel=panel;g=uigridlayout(panel,[3 1]);g.RowHeight={'1x',36,54};g.Padding=[6 6 6 6];
             app.Controls.ProjectTree=uitree(g,'SelectionChangedFcn',@(~,~)app.onTreeSelection());
             p=uigridlayout(g,[1 3]);p.ColumnWidth={'1x','1x','1x'};p.Padding=[0 0 0 0];
             uibutton(p,'Text','数据管理','ButtonPushedFcn',@(~,~)app.showWorkspace("data"));
@@ -158,7 +181,7 @@ classdef LfpProjectApp < handle
         end
 
         function buildWorkspace(app,parent)
-            holder=uipanel(parent,'BorderType','none');holder.Layout.Column=2;
+            holder=uipanel(parent,'BorderType','none');holder.Layout.Column=2;app.Controls.WorkspacePanel=holder;
             hg=uigridlayout(holder,[1 1]);hg.Padding=[0 0 0 0];
             app.Controls.Welcome=uipanel(hg,'BorderType','none');
             app.Controls.Welcome.Layout.Row=1;app.Controls.Welcome.Layout.Column=1;
@@ -234,13 +257,15 @@ classdef LfpProjectApp < handle
         end
 
         function buildComparePage(app,parent)
-            g=uigridlayout(parent,[4 1]);g.RowHeight={130,112,44,'1x'};g.Padding=[8 8 8 8];g.RowSpacing=6;
-            cp=uipanel(g,'Title','比较候选（筛选不会清除已选择对象）');c=uigridlayout(cp,[2 6]);c.RowHeight={32,'1x'};c.ColumnWidth={65,130,65,130,110,'1x'};
-            uilabel(c,'Text','被试');app.Controls.FilterSubject=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','访视');app.Controls.FilterVisit=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());app.Controls.SelectFiltered=uibutton(c,'Text','全选筛选结果','ButtonPushedFcn',@(~,~)app.selectFiltered());app.Controls.ClearComparison=uibutton(c,'Text','清空选择','ButtonPushedFcn',@(~,~)app.clearComparisonSelection());
-            app.Controls.CandidateTable=uitable(c,'Data',cell(0,7),'ColumnName',{'选择','被试','Session','访视','条件','结果状态','稳定 ID'},'ColumnEditable',[true false false false false false false],'RowName',[],'CellEditCallback',@(~,e)app.onCandidateEdited(e));app.Controls.CandidateTable.Layout.Row=2;app.Controls.CandidateTable.Layout.Column=[1 6];
-            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};app.Controls.SelectedSessions=uilistbox(s,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');app.Controls.MappingTable=uitable(s,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
-            x=uigridlayout(g,[1 12]);x.ColumnWidth={52,118,42,90,55,120,55,100,90,120,120,'1x'};x.Padding=[0 0 0 0];uilabel(x,'Text','指标');app.Controls.CompareMetric=uidropdown(x,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower');uilabel(x,'Text','频段');app.Controls.CompareBand=uidropdown(x,'Items',{'delta','theta','alpha','beta','lowGamma','highGamma'},'Value','beta');uilabel(x,'Text','图形');app.Controls.ComparePlot=uidropdown(x,'Items',{'点图','柱状图'},'Value','点图','ValueChangedFcn',@(~,~)app.renderComparison());uilabel(x,'Text','汇总');app.Controls.CompareAggregation=uidropdown(x,'Items',{'session'},'Value','session');app.Controls.CompareButton=uibutton(x,'Text','比较','ButtonPushedFcn',@(~,~)app.onCompare(false));app.Controls.UnifyCompare=uibutton(x,'Text','统一参数重算','ButtonPushedFcn',@(~,~)app.onCompare(true));app.Controls.CompareStatus=uilabel(x,'Text','未比较');
-            res=uigridlayout(g,[1 2]);res.ColumnWidth={'1x',190};app.Controls.CompareAxes=uiaxes(res);tools=uigridlayout(res,[6 1]);tools.RowHeight={38,38,38,38,'1x',60};uibutton(tools,'Text','保存图片','ButtonPushedFcn',@(~,~)app.saveComparisonImage());uibutton(tools,'Text','导出比较数据','ButtonPushedFcn',@(~,~)app.exportComparisonData());uibutton(tools,'Text','保存比较方案','ButtonPushedFcn',@(~,~)app.saveComparisonPlan());app.Controls.CompareDetails=uilabel(tools,'Text','缺失值不补零；跨被试不会连接为同一患者。','WordWrap','on','FontColor',[.35 .35 .35]);
+            g=uigridlayout(parent,[4 1]);app.Controls.CompareGrid=g;g.RowHeight={130,112,72,'1x'};g.Padding=[8 8 8 8];g.RowSpacing=6;
+            cp=uipanel(g,'Title','比较候选（筛选不会清除已选择对象）');c=uigridlayout(cp,[2 8]);c.RowHeight={32,'1x'};c.ColumnWidth={45,110,45,110,65,110,110,'1x'};
+            uilabel(c,'Text','被试');app.Controls.FilterSubject=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','访视');app.Controls.FilterVisit=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','分析状态');app.Controls.FilterStatus=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());app.Controls.SelectFiltered=uibutton(c,'Text','全选筛选结果','ButtonPushedFcn',@(~,~)app.selectFiltered());app.Controls.ClearComparison=uibutton(c,'Text','清空选择','ButtonPushedFcn',@(~,~)app.clearComparisonSelection());
+            app.Controls.CandidateTable=uitable(c,'Data',cell(0,7),'ColumnName',{'选择','被试','Session','访视','条件','结果状态','稳定 ID'},'ColumnEditable',[true false false false false false false],'RowName',[],'CellEditCallback',@(~,e)app.onCandidateEdited(e));app.Controls.CandidateTable.Layout.Row=2;app.Controls.CandidateTable.Layout.Column=[1 8];
+            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};left=uigridlayout(s,[2 1]);left.RowHeight={'1x',30};left.Padding=[0 0 0 0];app.Controls.SelectedSessions=uilistbox(left,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');lb=uigridlayout(left,[1 2]);lb.ColumnWidth={100,'1x'};lb.Padding=[0 0 0 0];app.Controls.RemoveSelectedComparison=uibutton(lb,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedComparison());app.Controls.SelectedCount=uilabel(lb,'Text','已选择 0 条','HorizontalAlignment','right');app.Controls.MappingTable=uitable(s,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
+            x=uigridlayout(g,[2 6]);x.RowHeight={32,32};x.ColumnWidth={55,120,65,120,120,'1x'};x.Padding=[0 0 0 0];
+            uilabel(x,'Text','指标');app.Controls.CompareMetric=uidropdown(x,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower');uilabel(x,'Text','频段');app.Controls.CompareBand=uidropdown(x,'Items',{'delta','theta','alpha','beta','lowGamma','highGamma'},'Value','beta');app.Controls.CompareButton=uibutton(x,'Text','比较','ButtonPushedFcn',@(~,~)app.onCompare(false));app.Controls.CompareStatus=uilabel(x,'Text','未比较');
+            uilabel(x,'Text','图形');app.Controls.ComparePlot=uidropdown(x,'Items',{'点图','柱状图'},'Value','点图','ValueChangedFcn',@(~,~)app.renderComparison());uilabel(x,'Text','汇总');app.Controls.CompareAggregation=uidropdown(x,'Items',{'session'},'Value','session');app.Controls.UnifyCompare=uibutton(x,'Text','统一参数重算','ButtonPushedFcn',@(~,~)app.onCompare(true));
+            res=uigridlayout(g,[1 2]);res.ColumnWidth={'1x',190};app.Controls.CompareAxes=uiaxes(res);tools=uigridlayout(res,[6 1]);tools.RowHeight={38,38,38,38,'1x',60};app.Controls.CompareSaveImage=uibutton(tools,'Text','保存图片','ButtonPushedFcn',@(~,~)app.saveComparisonImage());app.Controls.CompareExportData=uibutton(tools,'Text','导出比较数据','ButtonPushedFcn',@(~,~)app.exportComparisonData());app.Controls.CompareSavePlan=uibutton(tools,'Text','保存比较方案','ButtonPushedFcn',@(~,~)app.saveComparisonPlan());app.Controls.CompareDetails=uilabel(tools,'Text','缺失值不补零；跨被试不会连接为同一患者。','WordWrap','on','FontColor',[.35 .35 .35]);
         end
 
         function buildStatusbar(app,parent)
@@ -288,8 +313,7 @@ classdef LfpProjectApp < handle
                 app.setStatus('导入','正在检查 CSV…',.05);drawnow;
                 inspection=lfp_inspect_csv(path);settings=app.csvSettingsDialog(inspection,subject,session);
                 if isempty(settings),app.setStatus('就绪','已取消导入。',0);return;end
-                args=namedargs2cell(settings);[data,~]=lfp_import_csv_configured(path,args{:});
-                app.attachDataToSession(app.CurrentSessionId,data);
+                [data,~]=app.importCsvToSession(app.CurrentSessionId,path,settings);
                 app.setStatus('就绪',sprintf('已导入 %d 通道、%d 样本。',size(data.signal,2),size(data.signal,1)),0);
             catch e,app.showError(e,'导入失败');end
         end
@@ -357,6 +381,7 @@ classdef LfpProjectApp < handle
                 case "subject",app.CurrentSubjectId=string(info.id);app.CurrentSessionId="";app.showSubjectDetails();
                 case "session",app.selectSession(string(info.id));
             end
+            if app.CompactMode,app.NavigationOnly=false;app.applyResponsiveLayout();end
         end
 
         function refreshProject(app)
@@ -441,15 +466,15 @@ classdef LfpProjectApp < handle
 
         function refreshComparisonFilters(app)
             if app.noProject(),return;end
-            subjects=string({app.Project.subjects.subject_id});visits=strings(0,1);for i=1:numel(app.Project.subjects),visits=[visits;string({app.Project.subjects(i).sessions.visit_label})'];end %#ok<LFPS>
-            app.setDropdownItems(app.Controls.FilterSubject,["全部";unique(subjects(:),'stable')]);app.setDropdownItems(app.Controls.FilterVisit,["全部";unique(visits(strlength(visits)>0),'stable')]);
+            subjects=string({app.Project.subjects.subject_id});visits=strings(0,1);statuses=strings(0,1);for i=1:numel(app.Project.subjects),visits=[visits;string({app.Project.subjects(i).sessions.visit_label})'];statuses=[statuses;string({app.Project.subjects(i).sessions.status})'];end %#ok<LFPS>
+            app.setDropdownItems(app.Controls.FilterSubject,["全部";unique(subjects(:),'stable')]);app.setDropdownItems(app.Controls.FilterVisit,["全部";unique(visits(strlength(visits)>0),'stable')]);app.setDropdownItems(app.Controls.FilterStatus,["全部";unique(statuses(strlength(statuses)>0),'stable')]);
         end
 
         function refreshComparisonCandidates(app)
             if app.noProject(),app.Controls.CandidateTable.Data=cell(0,7);return;end
-            rows=cell(0,7);sf=string(app.Controls.FilterSubject.Value);vf=string(app.Controls.FilterVisit.Value);
+            rows=cell(0,7);sf=string(app.Controls.FilterSubject.Value);vf=string(app.Controls.FilterVisit.Value);rf=string(app.Controls.FilterStatus.Value);
             for i=1:numel(app.Project.subjects),subject=app.Project.subjects(i);if sf~="全部"&&subject.subject_id~=sf,continue;end
-                for j=1:numel(subject.sessions),session=subject.sessions(j);if vf~="全部"&&session.visit_label~=vf,continue;end
+                for j=1:numel(subject.sessions),session=subject.sessions(j);if vf~="全部"&&session.visit_label~=vf,continue;end;if rf~="全部"&&session.status~=rf,continue;end
                     selected=any(app.CompareSelectedSessionIds==session.session_id);condition=strtrim(session.medication_state+" "+session.stimulation_state);
                     rows(end+1,:)={selected,char(subject.subject_id),char(session.session_id),char(session.visit_label),char(condition),char(session.status),char(session.session_id)}; %#ok<AGROW>
                 end
@@ -462,9 +487,10 @@ classdef LfpProjectApp < handle
         end
         function selectFiltered(app),data=app.Controls.CandidateTable.Data;if isempty(data),return;end;app.CompareSelectedSessionIds=unique([app.CompareSelectedSessionIds;string(data(:,7))],'stable');app.refreshComparisonCandidates();end
         function clearComparisonSelection(app),app.CompareSelectedSessionIds=strings(0,1);app.refreshComparisonCandidates();end
+        function removeSelectedComparison(app),selected=string(app.Controls.SelectedSessions.Value);selected=selected(selected~="(未选择)");app.CompareSelectedSessionIds(ismember(app.CompareSelectedSessionIds,selected))=[];app.refreshComparisonCandidates();end
 
         function refreshSelectedSessions(app)
-            if isempty(app.CompareSelectedSessionIds),app.Controls.SelectedSessions.Items={'(未选择)'};app.Controls.SelectedSessions.Value={'(未选择)'};app.Controls.MappingTable.Data=cell(0,3);return;end
+            app.Controls.SelectedCount.Text=char("已选择 "+string(numel(app.CompareSelectedSessionIds))+" 条");if isempty(app.CompareSelectedSessionIds),app.Controls.SelectedSessions.Items={'(未选择)'};app.Controls.SelectedSessions.Value={'(未选择)'};app.Controls.MappingTable.Data=cell(0,3);return;end
             app.Controls.SelectedSessions.Items=cellstr(app.CompareSelectedSessionIds);app.Controls.SelectedSessions.Value=char(app.CompareSelectedSessionIds(1));old=app.Controls.MappingTable.Data;rows=cell(numel(app.CompareSelectedSessionIds),3);
             for i=1:numel(app.CompareSelectedSessionIds),id=app.CompareSelectedSessionIds(i);[session,~]=lfp_project_find_session(app.Project,id);channel="";if ~isempty(session)&&~isempty(session.channels),channel=string(session.channels(1).original_label);end
                 if ~isempty(old),match=find(string(old(:,1))==id,1);if ~isempty(match),channel=string(old{match,2});target=string(old{match,3});else,target=channel;end;else,target=channel;end;rows(i,:)={char(id),char(channel),char(target)};
@@ -485,8 +511,8 @@ classdef LfpProjectApp < handle
         function renderComparison(app)
             ax=app.Controls.CompareAxes;cla(ax,'reset');if isempty(fieldnames(app.CurrentComparison)),text(ax,.5,.5,'请选择比较对象并运行比较','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
             tbl=app.CurrentComparison.result_table;if isempty(tbl),text(ax,.5,.5,'没有可比较的有效结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
-            labels=string(tbl.subject_id)+" / "+string(tbl.visit_label)+" / "+string(tbl.channel_label);values=double(tbl.value);x=1:numel(values);if string(app.Controls.ComparePlot.Value)=="柱状图",bar(ax,x,values,'FaceColor',[.15 .45 .75]);else,scatter(ax,x,values,60,[.1 .4 .8],'filled');end
-            xticks(ax,x);xticklabels(ax,cellstr(labels));xtickangle(ax,25);grid(ax,'on');ylabel(ax,string(tbl.metric(1))+" ("+string(tbl.unit(1))+")",'Interpreter','none');title(ax,string(app.CurrentComparison.type)+" | "+string(tbl.band(1)),'Interpreter','none');app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | "+string(height(tbl))+" 点");
+            labels=string(tbl.subject_id)+" / "+string(tbl.visit_label)+" / "+string(tbl.channel_label);values=double(tbl.value(:));x=(1:numel(values))';if string(app.Controls.ComparePlot.Value)=="柱状图",bar(ax,x,values,'FaceColor',[.15 .45 .75]);else,scatter(ax,x,values,60,[.1 .4 .8],'filled');end
+            xticks(ax,x);xlim(ax,[.5 numel(values)+.5]);xticklabels(ax,cellstr(labels));xtickangle(ax,25);grid(ax,'on');ylabel(ax,string(tbl.metric(1))+" ("+string(tbl.unit(1))+")",'Interpreter','none');title(ax,string(app.CurrentComparison.type)+" | "+string(tbl.band(1)),'Interpreter','none');app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | "+string(height(tbl))+" 点");
         end
 
         function restoreLatestComparison(app)
@@ -515,6 +541,37 @@ classdef LfpProjectApp < handle
 
         function onWorkspaceTabChanged(app),if app.Controls.WorkspaceTabs.SelectedTab==app.Controls.CompareTab,app.refreshComparisonCandidates();elseif app.Controls.WorkspaceTabs.SelectedTab==app.Controls.AnalysisTab,app.refreshAnalysisView();end,end
         function showWorkspace(app,name),if app.noProject(),app.showWelcome();return;end;app.Controls.Welcome.Visible='off';app.Controls.WorkspaceTabs.Visible='on';switch string(name),case 'analysis',app.Controls.WorkspaceTabs.SelectedTab=app.Controls.AnalysisTab;case 'compare',app.Controls.WorkspaceTabs.SelectedTab=app.Controls.CompareTab;otherwise,app.Controls.WorkspaceTabs.SelectedTab=app.Controls.DataTab;end,end
+        function toggleNavigation(app)
+            if app.CompactMode
+                app.NavigationOnly=~app.NavigationOnly;
+            else
+                app.NavigationCollapsed=~app.NavigationCollapsed;
+            end
+            app.applyResponsiveLayout();
+        end
+        function applyResponsiveLayout(app)
+            if ~isgraphics(app.Figure)||~isfield(app.Controls,'BodyGrid')||~isgraphics(app.Controls.BodyGrid),return;end
+            if isfield(app.Controls,'HostPanel')&&isgraphics(app.Controls.HostPanel)
+                app.Controls.HostPanel.Position=[1 1 app.Figure.Position(3) app.Figure.Position(4)];
+            end
+            app.CompactMode=app.Figure.Position(3)<1300;
+            if app.CompactMode
+                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={130,112,68,'1x'};end
+                if app.NavigationOnly
+                    app.Controls.BodyGrid.ColumnWidth={'1x',0};app.Controls.NavigationPanel.Visible='on';app.Controls.WorkspacePanel.Visible='off';app.Controls.ToggleNavigation.Text='返回工作区';
+                else
+                    app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.WorkspacePanel.Visible='on';app.Controls.ToggleNavigation.Text='打开导航';
+                end
+            else
+                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={130,112,72,'1x'};end
+                app.NavigationOnly=false;app.Controls.WorkspacePanel.Visible='on';
+                if app.NavigationCollapsed
+                    app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.ToggleNavigation.Text='打开导航';
+                else
+                    app.Controls.BodyGrid.ColumnWidth={285,'1x'};app.Controls.NavigationPanel.Visible='on';app.Controls.ToggleNavigation.Text='收起导航';
+                end
+            end
+        end
         function showWelcome(app),app.Controls.Welcome.Visible='on';app.Controls.WorkspaceTabs.Visible='off';app.Controls.SaveProject.Enable='off';end
         function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.applyConfigToControls();end
         function clearSessionDisplay(app),app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.ChannelTable.Data=cell(0,8);app.Controls.Metadata.Value={'请选择项目节点。'};app.clearAnalysisAxes('请选择 Session。');app.refreshDataPreview();end

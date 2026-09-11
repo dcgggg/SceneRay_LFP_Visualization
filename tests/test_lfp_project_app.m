@@ -45,7 +45,18 @@ comparison=app.compareSelected(false);
 verifyEqual(testCase,string(comparison.status),"ok");
 verifyEqual(testCase,height(comparison.result_table),2);
 verifyTrue(testCase,all(isfinite(comparison.result_table.value)));
+app.Figure.Position=[100 100 1100 800];app.Figure.SizeChangedFcn(app.Figure,[]);app.Controls.WorkspaceTabs.SelectedTab=app.Controls.CompareTab;drawnow;
+verifyTrue(testCase,app.CompactMode);verifyEqual(testCase,app.Controls.BodyGrid.ColumnWidth{1},0);
+verifyGreaterThan(testCase,pixel_width(app.Controls.CompareButton),70);
+verifyGreaterThan(testCase,pixel_width(app.Controls.CompareSaveImage),70);
+verifyGreaterThan(testCase,pixel_width(app.Controls.CompareExportData),70);
 snapshot=fullfile(root,'gui_snapshot.png');app.exportSnapshot(snapshot);verifyTrue(testCase,isfile(snapshot));
+app.Controls.FilterVisit.Value='Baseline';app.Controls.FilterVisit.ValueChangedFcn(app.Controls.FilterVisit,[]);
+verifyEqual(testCase,numel(app.CompareSelectedSessionIds),2);verifyEqual(testCase,size(app.Controls.CandidateTable.Data,1),1);
+app.Controls.FilterStatus.Value='analyzed';app.Controls.FilterStatus.ValueChangedFcn(app.Controls.FilterStatus,[]);
+verifyEqual(testCase,size(app.Controls.CandidateTable.Data,1),1);
+app.Controls.SelectedSessions.Value='S01';app.Controls.RemoveSelectedComparison.ButtonPushedFcn(app.Controls.RemoveSelectedComparison,[]);
+verifyEqual(testCase,app.CompareSelectedSessionIds,"S02");
 app.close(true);app=launchLfpProjectApp(Visible="off",ProjectRoot=root);
 verifyEqual(testCase,numel(app.Project.subjects),1);
 verifyEqual(testCase,numel(app.Project.subjects(1).sessions),2);
@@ -68,4 +79,9 @@ end
 
 function delete_if_valid(app)
 if ~isempty(app) && isvalid(app), app.delete(); end
+end
+
+function width = pixel_width(control)
+position = getpixelposition(control, true);
+width = position(3);
 end
