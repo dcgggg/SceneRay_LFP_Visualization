@@ -12,11 +12,12 @@
 - 新增同一 Session 多文件同步 segment 追加接口，严格校验采样率、长度、时间轴和重复通道。
 - 新增 CSV 到显式 Session 的导入桥接函数，支持 SceneRay 与已确认的通用 CSV 设置。
 - 新增比较长表 CSV/MAT 导出函数，保留每行来源 run_id 和配置指纹。
+- 新增 `launchLfpProjectApp` / `LfpProjectApp` 原生项目工作区，提供数据管理、单次分析和结果比较三个基础 Tab。
 - LFP 项目平台测试：3 项通过。
 
 ## 尚未完成
 
-- GUI 尚未加入完整的 Subject–Session 树和比较工作区；现有单次分析 GUI 保持不变。
+- 项目工作区目前是基础版本，复杂的条件筛选、通道映射编辑和统一参数重算仍需继续接入。
 - 多文件合并为同一 Session 的同步校验和多段 segment 管理仍需继续实现。
 - Comparison 的通道映射界面、统一参数重新分析按钮和趋势图仍需接入 GUI。
 
