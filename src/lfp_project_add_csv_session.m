@@ -12,6 +12,7 @@ arguments
     sessionInfo (1,1) struct = struct()
     options.ImportMode (1,1) string {mustBeMember(options.ImportMode, ["scenray" "configured"])} = "scenray"
     options.ImportSettings (1,1) struct = struct()
+    options.AppendToSessionId (1,1) string = ""
     options.Save (1,1) logical = true
 end
 if ~isfile(filePath), error('LFP:InputFileNotFound', 'CSV file not found: %s', filePath); end
@@ -28,5 +29,12 @@ else
     importInfo = struct('format', "configured", 'filePath', filePath, 'settings', options.ImportSettings);
 end
 data.metadata.sourceFilePath = filePath;
+if strlength(options.AppendToSessionId) > 0
+    [project, report] = lfp_project_append_data(project, options.AppendToSessionId, data, ...
+        ImportConfig=options.ImportSettings, Save=options.Save);
+    [session,~] = lfp_project_find_session(project, options.AppendToSessionId);
+    importInfo.appended = true; importInfo.addedChannelIds = report.addedChannelIds;
+    return;
+end
 [project, session] = lfp_project_add_session(project, subjectId, data, sessionInfo, Save=options.Save);
 end

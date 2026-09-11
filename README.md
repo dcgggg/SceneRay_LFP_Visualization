@@ -37,7 +37,7 @@ EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会�
 
 ## 当前状态
 
-当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam 参数化、Gaussian 周期峰、频带功率点图、结果导出以及 MATLAB 原生项目 GUI。主界面把每份记录绑定到明确的 Subject/Session，Session 内保留同步的 samples × channels 数组，禁止跨记录拼接计算 PSD。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
+当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam 参数化、Gaussian 周期峰、频带功率点图、结果导出以及 MATLAB 原生项目 GUI。主界面把每份记录绑定到明确的 Subject/Session，并支持向同一 Session 追加多个 CSV；每个通道拥有稳定 `channel_id` 和独立 MAT 原始缓存，长度、采样率或时间轴不同的通道不会被裁剪、补零或重采样。首次同步导入仍保留兼容的 Session MAT。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
 
 通过顶部“新建项目”创建的项目会自动建立可移动的目录：`subjects/<显示名>__<稳定ID>/<Session显示名>__<稳定ID>/` 下保存 `subject.mat`、`session.mat`、`data/`、`configs/`、`results/` 和 `exports/`，项目级比较方案、导出文件和日志分别位于 `comparisons/`、`exports/` 和 `logs/`。导入的源 CSV 会复制到对应 Session 的 `data/`（同名文件自动加后缀），原文件和原始路径仍保留。Subject/Session 重命名只更新显示名和相对引用，稳定 ID 不变；旧的根目录 `data/`/`results/` 项目仍按兼容模式读取。
 
@@ -57,7 +57,7 @@ app = launch_gui;
 
 1. 新建项目或打开包含 `project.mat` 的项目目录；
 2. 添加被试，再为被试添加无数据的 Session；
-3. 选中 Session 后导入 CSV，在预览窗口确认采样率、时间列和信号列；
+3. 选中 Session 后导入一个或多个 CSV；后续再次导入会追加新通道，预览窗口确认采样率、时间列和信号列；
 4. 在“单次分析”页运行伪影、PSD、specparam 和频带功率；
 5. 在“结果比较”页独立勾选 Session，确认每条记录的通道映射后比较或导出；
 6. 保存并关闭；下次打开时恢复项目、AnalysisRun 和最近保存的比较方案。
@@ -103,6 +103,8 @@ data = lfp_import_scenray_csv("recording.csv");
 [project, ~] = lfp_project_add_session(project, "P01", data, ...
     struct('session_id', "P01_Baseline", 'visit_label', "Baseline", ...
            'medication_state', "off", 'stimulation_state', "on"));
+% Later imports can be appended to the same Session without aligning channels:
+% [project, report] = lfp_project_append_data(project, "P01_Baseline", data2);
 [project, ~] = lfp_project_add_csv_session(project, "P01", "recording2.csv", ...
     struct('session_id', "P01_Day07", 'visit_label', "Day07"));
 [project, runSummary] = lfp_analyze_project(project, "P01_Baseline");
@@ -113,7 +115,7 @@ plotProjectComparison(comparison, Band="delta", Metric="totalPower");
 files = lfp_export_comparison(comparison, "comparison_output");
 ```
 
-`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
+`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
 
 项目管理 API 与 GUI 使用相同的稳定 ID、数据文件和结果缓存；GUI 不把不同 Session 的原始信号拼接计算。
 

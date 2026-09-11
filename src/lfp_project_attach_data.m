@@ -77,7 +77,7 @@ ref = struct('relative_path', relativeDataPath, 'source_path', sourcePath, ...
     'fs', double(data.fs), 'time_start', double(data.time(1)), ...
     'time_end', double(data.time(end)), 'channel_labels', labels, 'channel_ids', string({channels.channel_id})', ...
     'cache_relative_paths', strings(numel(channels),1), 'source_file_id', sourceFileId, ...
-    'source_file_fingerprint', sourceFingerprint, 'import_config', get_field(get_field(data, 'metadata', struct()), 'importConfig', struct()), ...
+    'source_file_fingerprint', sourceFingerprint, 'import_config', import_config_from_data(data), ...
     'time_unit', 's', 'signal_unit', string(get_field(data, 'units', 'unknown')), 'imported_at', string(datestr(now,31)), 'cache_version', '1');
 % Keep a per-channel cache even for the canonical first import. This enables
 % later independent channel analysis without changing the legacy session MAT.
@@ -148,6 +148,13 @@ value = "";
 if isfield(data, 'metadata') && isstruct(data.metadata) && isfield(data.metadata, name)
     value = string(data.metadata.(name));
 end
+end
+
+function value = import_config_from_data(data)
+value = struct();
+if ~isfield(data, 'metadata') || ~isstruct(data.metadata), return; end
+if isfield(data.metadata, 'importConfig'), value = data.metadata.importConfig;
+elseif isfield(data.metadata, 'importSettings'), value = data.metadata.importSettings; end
 end
 
 function relativePath = copy_source_file(project, session, sourcePath)

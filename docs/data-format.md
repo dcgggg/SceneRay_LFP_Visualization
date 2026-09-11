@@ -22,6 +22,18 @@ data.processingHistory  % ordered struct array of operations and parameters
 data.cleanedSignal      % optional NaN-marked analysis/display copy
 ```
 
+### Session 内的通道缓存
+
+项目模式下 `Session.channels` 为每个通道保存 `channel_id`、`source_file_id`、
+`source_column`、`sampling_rate_hz`、`sample_count`、`cache_relative_path`、
+`enabled`、`data_revision` 和质量/来源元数据。原始样本位于 Session `data/channels/`
+下的独立 MAT 文件中；`lfp_project_get_channel_data(project,sessionId,channelId)`
+按通道读取并校验缓存。`lfp_project_append_data` 只追加新通道，拒绝重复的源文件+列，
+不会因为名称相同而覆盖已有通道。移除通道只更新活动索引，不删除共享缓存或历史结果。
+不同通道可以有不同长度、采样率和时间轴，分析函数逐通道执行；为兼容旧接口，
+`lfp_project_get_session_data` 在需要时返回带 NaN 标记的显示矩阵，并在 metadata 中标记
+`heterogeneousChannels`，该矩阵不能替代独立通道分析输入。
+
 For generic CSV files, `lfp_inspect_csv` reads only a bounded prefix for preview and automatic suggestions; it does not materialize the entire file as a heterogeneous cell array. `lfp_import_csv_configured` accepts the confirmed settings and uses a numeric `readmatrix` path for rectangular files, with an explicitly recorded `readcell_fallback` only when the numeric reader cannot handle the source. With `DataDirection="samples_by_channels"`, rows are samples and selected columns are channels. With `DataDirection="channels_by_samples"`, selected columns are samples and each source row is a channel; the output is normalized back to samples × channels. A time column is not supported for the latter orientation because its meaning is ambiguous; provide an explicit sampling rate. Missing signal cells remain NaN and are counted in `metadata.missingValueCount`.
 
 `metadata.timeValidation` records monotonicity, duplicates, regularity, median time step and coefficient of variation. The GUI blocks PSD/model workflows when this validation is invalid or irregular rather than silently resampling. If no time column is supplied, a user-confirmed `SamplingRateHz` is required and `data.time` is generated from sample indices.
@@ -60,7 +72,10 @@ mapping specifies side, region, contacts or reference.
 
 The GUI uses a metadata-first workflow: `lfp_project_add_empty_session`
 creates a stable Session with status `no_data`, and
-`lfp_project_attach_data` later attaches one canonical synchronized record.
+`lfp_project_attach_data` attaches the first canonical synchronized record.
+Subsequent files can be appended with `lfp_project_append_data`; each imported
+channel is independently cached and can be enabled/disabled without deleting
+raw samples.
 Removing a Subject or Session from the project index does not delete the
 original CSV or the project's stored data/result files. Editable display labels,
 side, region, contacts and reference can be edited without changing

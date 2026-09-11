@@ -42,10 +42,26 @@ ids=string(session.channels(2).channel_id);tbl=table(ids,'VariableNames',{'chann
 [project,~]=lfp_project_remove_channels(project,sessionId,ids,Save=false);[session,~]=lfp_project_find_session(project,sessionId);verifyEqual(testCase,numel(session.channels),1);verifyTrue(testCase,isfile(cache));
 end
 
+function testGuiImportBridgeAppendsWithoutReparsingOldChannels(testCase)
+projectRoot=fileparts(fileparts(mfilename('fullpath')));addpath(fullfile(projectRoot,'src'));
+root=string(tempname);mkdir(root);cleanup=onCleanup(@() cleanup_root(root));
+app=launchLfpProjectApp(Visible="off");cleanupApp=onCleanup(@() delete_if_valid(app));
+app.createProjectAt(root,"GuiChannels");app.addSubjectRecord(struct('subject_id',"S1",'display_name',"S1"));app.addSessionRecord("S1",struct('session_id',"SE1"));
+for k=1:2
+    path=fullfile(root,"source"+string(k)+".csv");fid=fopen(path,'w');fprintf(fid,'Time,Ch%d\n',k);for n=0:99,fprintf(fid,'%.6f,%.6f\n',n/1000,sin(2*pi*(5+k)*n/1000));end;fclose(fid);
+    inspection=lfp_inspect_csv(path);settings=struct('Inspection',inspection,'SamplingRateHz',1000,'Units',"uV",'TimeColumn',1,'SignalColumns',2,'HeaderRow',1,'DataStartRow',2,'TimeUnit',"s",'UseSceneRay',false);
+    app.importCsvToSession("SE1",string(path),settings);
+end
+[session,~]=lfp_project_find_session(app.Project,"SE1");verifyEqual(testCase,numel(session.channels),2);verifyEqual(testCase,numel(session.data_refs),2);
+end
+
 function [project,sessionId,root]=make_project()
 projectRoot=fileparts(fileparts(mfilename('fullpath')));addpath(fullfile(projectRoot,'src'));
 root=string(tempname);mkdir(root);project=lfp_create_project(char(root),char("ChannelTest"));[project,~]=lfp_project_add_subject(project,struct('subject_id',"S1",'display_name',"S1"),Save=false);[project,session]=lfp_project_add_empty_session(project,"S1",struct('session_id',"SE1"),Save=false);sessionId=string(session.session_id);
 end
 function cleanup_root(root)
 if isfolder(root),rmdir(root,'s');end
+end
+function delete_if_valid(app)
+if ~isempty(app)&&isvalid(app),app.delete();end
 end

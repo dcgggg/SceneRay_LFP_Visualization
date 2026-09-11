@@ -3,7 +3,7 @@
 ## Layers
 
 1. **Data import** — parses SceneRay metadata and signal columns without changing source files.
-2. **Data model** — stores `signal`, `fs`, `time`, `channelLabels`, `units`, `metadata`, `artifacts`, and `processingHistory`.
+2. **Data model** — stores `signal`, `fs`, `time`, `channelLabels`, `units`, `metadata`, `artifacts`, and `processingHistory`; Project Sessions additionally store stable per-channel metadata and independent raw-cache references.
 3. **Preprocessing and artifacts** — robust amplitude, derivative/step, and saturation markers with optional NaN-derived signal.
 4. **Spectral analysis** — artifact-aware manual Welch or DPSS Multitaper PSD; no line-frequency notch.
 5. **Spectral parameterization** — native MATLAB specparam with fixed or estimated-knee aperiodic models; no fitting-time interpolation; periodic peaks remain separate from the background.
@@ -14,7 +14,7 @@
 10. **Legacy dataset manager** — `launchLfpApp` retains the previous independent `Datasets(k)` workflow for compatibility. It is not the primary project GUI and never shares live state with `LfpProjectApp`.
 11. **Legacy task manager** — `LfpAnalysisTaskManager` remains available to the compatibility GUI. The project GUI calls the project analysis dispatcher and exposes cooperative cancellation at its progress checkpoints.
 12. **Project platform** — `lfp_create_project_in_parent` creates a self-contained project folder after validating the parent and name. New GUI-created projects use `storage_mode="subject_session"`: `subjects/<display-name>__<stable-id>/<visit>__<stable-id>/` contains `subject.mat`, `session.mat`, `data/`, `configs/`, `results/` and `exports/`; project-wide `comparisons/`, `exports/` and `logs/` remain at the project root. Direct callers of `lfp_create_project` retain the legacy root-level `data/` and `results/` layout, so old projects remain readable.
-13. **AnalysisRun/cache** — `lfp_analyze_project` runs Sessions independently, creates versioned run metadata and derived result files under `results/`, and reuses a run only when both the content-sensitive data version and computation-only configuration fingerprint match.
+13. **AnalysisRun/cache** — `lfp_analyze_project` runs Sessions independently, creates versioned run metadata and derived result files under `results/`, and reuses a run only when both the content-sensitive data version and computation-only configuration fingerprint match. Sessions with appended or heterogeneous files use `lfp_analyze_independent_channels`; each enabled Channel is analyzed and cached separately under `results/channels/`.
 14. **Comparison/query** — `lfp_compare_project` reads saved band-power results into an explicit long table and records comparison type, Session IDs, visit labels, run IDs and configuration compatibility. It never concatenates raw signals or treats epochs/channels as independent subjects. `plotProjectComparison` renders the table as Session-level points without inferential statistics. `lfp_build_psd_comparison` and `plotGroupedPsdComparison` add subject-weighted group curves (Sessions are averaged within Subject first); `plotGroupedBandPower` uses the same subject-level weighting for bars, points and SD. Group labels belong to the comparison mapping and do not modify Subject metadata.
 15. **Batch/migration** — `lfp_run_batch` provides a GUI-free task entry point with a project lock; `lfp_preview_legacy_dataset` and `lfp_migrate_legacy_dataset` require explicit Subject/Session identity and preserve the source file.
 
@@ -26,7 +26,7 @@ The base path must not require Python, R, Java, Node.js, network access, or auto
 
 ```text
 CSV -> inspection/import confirmation -> validated data model
-    -> Project/Subject/Session/Channel reference (optional)
+    -> Project/Subject/Session/Channel reference and per-channel cache (optional)
     -> derived preprocessing -> artifact annotations -> PSD -> parameterization
     -> bands/figures/tables/log -> AnalysisRun/export -> Comparison query
 ```
@@ -35,7 +35,10 @@ CSV -> inspection/import confirmation -> validated data model
 
 The GUI takes a run snapshot containing the selected channels, analysis range, module switches and a copied configuration. A successful run replaces the previous result atomically; a failed or cancelled run leaves the last successful result and raw data intact. Plot-only edits do not trigger analysis, while data/artifact/PSD/model/band edits invalidate their downstream caches.
 
-The raw signal remains in the data model and is never overwritten by a derived signal.
+The raw signal remains in the data model and is never overwritten by a derived signal. A
+Session may contain channels with different sample counts or time axes; the display-only
+compatibility matrix may contain NaN padding, but analysis always reads the individual
+channel cache and never treats padding as samples.
 
 Project persistence is intentionally separate from transient GUI handles. `project.mat` contains metadata, stable IDs, configuration, saved comparison plans and result references. In nested projects, each Session stores canonical raw arrays in its own `data/session_data.mat` and derived results in its own `results/<run_id>.mat`; legacy projects keep `data/<session_id>.mat` and root `results/<run_id>.mat`. `comparisons/<comparison_id>.mat` contains reproducible comparison tables and group definitions. Relative references allow the complete project folder to be moved and reopened without importing or recomputing successful runs; source CSVs are copied into Session/data with a collision-safe name while the original source path is retained as provenance.
 

@@ -211,4 +211,7 @@ function tf = should_analyze_channels(session)
 % Session. A single synchronized legacy Session keeps the original matrix
 % pipeline and result format for backward compatibility.
 tf = numel(session.data_refs) > 1;
+if ~tf && ~isempty(session.channels) && isfield(session.channels, 'enabled')
+    tf = any(~logical([session.channels.enabled]));
+end
 end

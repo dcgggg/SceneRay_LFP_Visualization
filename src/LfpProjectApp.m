@@ -7,11 +7,13 @@ classdef LfpProjectApp < handle
         CurrentSubjectId = ""
         CurrentSessionId = ""
         CurrentChannelIndex = 1
+        SelectedChannelRows = []
         CurrentRun = struct()
         CurrentResults = struct()
         CurrentData = struct()
         CurrentComparison = struct()
         CompareSelectedSessionIds = strings(0,1)
+        CompareSelectedChannelKeys = strings(0,1)
         CompareGroupLabels = strings(0,1)
         Controls = struct()
         Dirty = false
@@ -104,10 +106,18 @@ classdef LfpProjectApp < handle
             end
             [session,~]=lfp_project_find_session(app.Project,sessionId);
             if isempty(session),error('LFP:SessionNotFound','Session ID not found: %s',sessionId);end
-            if ~isempty(session.data_refs),error('LFP:SessionHasData','Session %s already has data.',sessionId);end
             args=namedargs2cell(settings);[data,importInfo]=lfp_import_csv_configured(path,args{:});
-            app.attachDataToSession(sessionId,data);
-            app.setStatus('就绪',sprintf('已导入 %d 通道、%d 样本。',size(data.signal,2),size(data.signal,1)),0);
+            data.metadata.sourceFilePath=path; data.metadata.sourceFileName=string(get_filename_local(path));
+            if isfield(data.metadata,'signalColumns'),data.metadata.sourceColumns=double(data.metadata.signalColumns(:)');end
+            if isempty(session.data_refs)
+                app.attachDataToSession(sessionId,data);
+                importInfo.appended=false; [sessionNow,~]=lfp_project_find_session(app.Project,sessionId); importInfo.addedChannelIds=string({sessionNow.channels.channel_id})';
+            else
+                [app.Project,report]=lfp_project_append_data(app.Project,sessionId,data,ImportConfig=settings,Save=false);
+                app.CurrentSessionId=string(sessionId); app.markDirty(); app.refreshProject(); app.selectSession(sessionId);
+                importInfo.appended=true; importInfo.addedChannelIds=report.addedChannelIds;
+            end
+            app.setStatus('就绪',sprintf('已导入 %d 通道、%d 样本%s。',size(data.signal,2),size(data.signal,1),local_append_suffix(importInfo.appended)),0);
         end
 
         function selectSession(app,sessionId)
@@ -209,16 +219,16 @@ classdef LfpProjectApp < handle
             a=uigridlayout(g,[1 6]);a.ColumnWidth={110,110,110,110,110,'1x'};a.Padding=[0 0 0 0];
             app.Controls.AddSubject=uibutton(a,'Text','添加被试','ButtonPushedFcn',@(~,~)app.addSubjectDialog());
             app.Controls.AddSession=uibutton(a,'Text','添加 Session','ButtonPushedFcn',@(~,~)app.addSessionDialog());
-            app.Controls.ImportData=uibutton(a,'Text','导入数据','ButtonPushedFcn',@(~,~)app.importCsvDialog());
+            app.Controls.ImportData=uibutton(a,'Text','导入/追加数据','ButtonPushedFcn',@(~,~)app.importCsvDialog());
             app.Controls.EditMetadata=uibutton(a,'Text','编辑信息','ButtonPushedFcn',@(~,~)app.editMetadataDialog());
             app.Controls.RemoveNode=uibutton(a,'Text','移除','ButtonPushedFcn',@(~,~)app.removeSelectedNode());
             app.Controls.DataContext=uilabel(a,'Text','选择项目节点开始。','HorizontalAlignment','right');
             app.Controls.Metadata=uitextarea(g,'Editable','off','Value',{'尚未选择对象。'},'WordWrap','on');
             content=uigridlayout(g,[1 2]);content.ColumnWidth={520,'1x'};content.Padding=[0 0 0 0];
             cp=uipanel(content,'Title','通道信息（原始名称和 ID 不可修改）');cg=uigridlayout(cp,[2 1]);cg.RowHeight={'1x',32};cg.Padding=[4 4 4 4];
-            app.Controls.ChannelTable=uitable(cg,'Data',cell(0,8),'ColumnName',{'ID','原始名称','显示名称','侧别','脑区','触点','参考','单位'}, ...
-                'ColumnEditable',[false false true true true true true false],'RowName',[],'CellEditCallback',@(~,~)app.saveChannelEdits());
-            app.Controls.ChannelHint=uilabel(cg,'Text','编辑显示名称、侧别、脑区或参考后保存项目；不会改变原始数据。','FontColor',[.35 .35 .35]);
+            app.Controls.ChannelTable=uitable(cg,'Data',cell(0,13),'ColumnName',{'启用','ID','原始名称','显示名称','侧别','脑区','触点','参考','采样率(Hz)','样本数','时长(s)','单位','来源文件'}, ...
+                'ColumnEditable',[true false false true true true true true false false false false false],'RowName',[],'CellSelectionCallback',@(~,e)app.selectChannelRows(e),'CellEditCallback',@(~,~)app.saveChannelEdits());
+            foot=uigridlayout(cg,[1 4]);foot.ColumnWidth={90,90,90,'1x'};foot.Padding=[0 0 0 0];app.Controls.EnableChannels=uibutton(foot,'Text','启用所选','ButtonPushedFcn',@(~,~)app.setSelectedChannelsEnabled(true));app.Controls.DisableChannels=uibutton(foot,'Text','停用所选','ButtonPushedFcn',@(~,~)app.setSelectedChannelsEnabled(false));app.Controls.RemoveChannels=uibutton(foot,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedChannels());app.Controls.ChannelHint=uilabel(foot,'Text','停用不删除数据；移除仅更新活动通道索引，缓存保留。','FontColor',[.35 .35 .35]);
             pp=uipanel(content,'Title','完整记录预览');pg=uigridlayout(pp,[2 1]);pg.RowHeight={34,'1x'};pg.Padding=[4 4 4 4];
             top=uigridlayout(pg,[1 3]);top.ColumnWidth={70,180,'1x'};top.Padding=[0 0 0 0];uilabel(top,'Text','通道');
             app.Controls.DataPreviewChannel=uidropdown(top,'Items',{'(无)'},'ValueChangedFcn',@(~,~)app.refreshDataPreview());app.Controls.DataPreviewInfo=uilabel(top,'Text','','HorizontalAlignment','right');
@@ -339,15 +349,17 @@ classdef LfpProjectApp < handle
         function importCsvDialog(app)
             if strlength(app.CurrentSessionId)==0,app.warn('请先创建并选择 Session。');return;end
             [session,subject]=lfp_project_find_session(app.Project,app.CurrentSessionId);
-            if ~isempty(session.data_refs),app.warn('当前 Session 已有数据；如需导入另一记录，请新建 Session。');return;end
-            [file,folder]=uigetfile({'*.csv','CSV 文件'},'选择 LFP CSV');if isequal(file,0),return;end
-            path=string(fullfile(folder,file));
+            [file,folder]=uigetfile({'*.csv','CSV 文件'},'选择 LFP CSV（可多选）','MultiSelect','on');if isequal(file,0),return;end
+            if iscell(file),paths=string(fullfile(folder,file));else,paths=string(fullfile(folder,file));end
             try
-                app.setStatus('导入','正在检查 CSV…',.05);drawnow;
-                inspection=lfp_inspect_csv(path);settings=app.csvSettingsDialog(inspection,subject,session);
-                if isempty(settings),app.setStatus('就绪','已取消导入。',0);return;end
-                [data,~]=app.importCsvToSession(app.CurrentSessionId,path,settings);
-                app.setStatus('就绪',sprintf('已导入 %d 通道、%d 样本。',size(data.signal,2),size(data.signal,1)),0);
+                totalChannels=0;totalSamples=0;
+                for index=1:numel(paths)
+                    app.setStatus('导入','正在检查 CSV '+string(index)+'/'+string(numel(paths))+'…',.05+(index-1)/max(numel(paths),1)*.8);drawnow;
+                    inspection=lfp_inspect_csv(paths(index));settings=app.csvSettingsDialog(inspection,subject,session);
+                    if isempty(settings),app.setStatus('就绪','已取消剩余导入。',0);return;end
+                    [data,~]=app.importCsvToSession(app.CurrentSessionId,paths(index),settings);totalChannels=totalChannels+size(data.signal,2);totalSamples=max(totalSamples,size(data.signal,1));
+                end
+                app.setStatus('就绪',sprintf('已导入 %d 个文件、%d 通道（最长 %d 样本）。',numel(paths),totalChannels,totalSamples),0);
             catch e,app.showError(e,'导入失败');end
         end
 
@@ -403,8 +415,32 @@ classdef LfpProjectApp < handle
         function saveChannelEdits(app)
             if strlength(app.CurrentSessionId)==0,return;end
             raw=app.Controls.ChannelTable.Data;if isempty(raw),return;end
-            tbl=cell2table(raw,'VariableNames',{'channel_id','original_label','display_label','side','region','contacts','reference','unit'});
+            tbl=table('Size',[size(raw,1) 9],'VariableTypes',{'logical','string','string','string','string','string','string','string','string'}, ...
+                'VariableNames',{'enabled','channel_id','display_label','side','region','contacts','reference','unit','quality_status'});
+            for row=1:size(raw,1)
+                tbl.enabled(row)=logical(raw{row,1}); tbl.channel_id(row)=string(raw{row,2}); tbl.display_label(row)=string(raw{row,4});
+                tbl.side(row)=string(raw{row,5}); tbl.region(row)=string(raw{row,6}); tbl.contacts(row)=string(raw{row,7}); tbl.reference(row)=string(raw{row,8}); tbl.unit(row)=string(raw{row,12}); tbl.quality_status(row)=string(get_cell_local(raw,row,13,"unassessed"));
+            end
             [app.Project,~]=lfp_project_update_channels(app.Project,app.CurrentSessionId,tbl,Save=false);app.markDirty();app.loadCurrentSession();app.refreshProject();
+        end
+
+        function selectChannelRows(app, event)
+            if isempty(event.Indices), app.SelectedChannelRows=[]; else, app.SelectedChannelRows=unique(event.Indices(:,1)); end
+        end
+
+        function setSelectedChannelsEnabled(app, enabled)
+            if strlength(app.CurrentSessionId)==0 || isempty(app.SelectedChannelRows), app.warn('请先在通道表中选择一个或多个通道。'); return; end
+            rows=app.Controls.ChannelTable.Data; ids=strings(numel(app.SelectedChannelRows),1);
+            for k=1:numel(app.SelectedChannelRows), ids(k)=string(rows{app.SelectedChannelRows(k),2}); end
+            tbl=table(ids,'VariableNames',{'channel_id'}); tbl.enabled=repmat(logical(enabled),numel(ids),1);
+            [app.Project,~]=lfp_project_update_channels(app.Project,app.CurrentSessionId,tbl,Save=false); app.markDirty(); app.loadCurrentSession(); app.refreshProject();
+        end
+
+        function removeSelectedChannels(app)
+            if strlength(app.CurrentSessionId)==0 || isempty(app.SelectedChannelRows), app.warn('请先在通道表中选择一个或多个通道。'); return; end
+            rows=app.Controls.ChannelTable.Data;ids=strings(numel(app.SelectedChannelRows),1);for k=1:numel(app.SelectedChannelRows),ids(k)=string(rows{app.SelectedChannelRows(k),2});end
+            answer=uiconfirm(app.Figure,'移除只会更新活动通道列表；原始缓存、CSV和历史结果会保留。','移除通道','Options',{'移除','取消'},'DefaultOption',2,'CancelOption',2);if answer~="移除",return;end
+            [app.Project,~]=lfp_project_remove_channels(app.Project,app.CurrentSessionId,ids,Save=false);app.SelectedChannelRows=[];app.markDirty();app.loadCurrentSession();app.refreshProject();
         end
 
         function onTreeSelection(app)
@@ -428,17 +464,17 @@ classdef LfpProjectApp < handle
         end
 
         function showProjectDetails(app)
-            app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.Metadata.Value={char("项目："+app.Project.name);char("说明："+string(app.Project.description));char("位置："+app.Project.rootPath);sprintf('被试数：%d',numel(app.Project.subjects))};app.Controls.ChannelTable.Data=cell(0,8);app.Controls.DataContext.Text='当前：项目';app.refreshDataPreview();
+            app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.Metadata.Value={char("项目："+app.Project.name);char("说明："+string(app.Project.description));char("位置："+app.Project.rootPath);sprintf('被试数：%d',numel(app.Project.subjects))};app.Controls.ChannelTable.Data=cell(0,13);app.Controls.DataContext.Text='当前：项目';app.refreshDataPreview();
         end
 
         function showSubjectDetails(app)
-            app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();i=find(string({app.Project.subjects.subject_id})==app.CurrentSubjectId,1);if isempty(i),return;end;s=app.Project.subjects(i);app.Controls.Metadata.Value={char("被试 ID："+s.subject_id);char("显示名称："+s.display_name);char("分组："+s.group);char("备注："+s.notes);sprintf('Session 数：%d',numel(s.sessions))};app.Controls.ChannelTable.Data=cell(0,8);app.Controls.DataContext.Text=char("当前被试："+s.subject_id);app.refreshDataPreview();
+            app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();i=find(string({app.Project.subjects.subject_id})==app.CurrentSubjectId,1);if isempty(i),return;end;s=app.Project.subjects(i);app.Controls.Metadata.Value={char("被试 ID："+s.subject_id);char("显示名称："+s.display_name);char("分组："+s.group);char("备注："+s.notes);sprintf('Session 数：%d',numel(s.sessions))};app.Controls.ChannelTable.Data=cell(0,13);app.Controls.DataContext.Text=char("当前被试："+s.subject_id);app.refreshDataPreview();
         end
 
         function updateSessionContext(app,session,subject)
             duration=NaN;fs=NaN;samples=0;if ~isempty(session.data_refs),r=session.data_refs(1);duration=r.time_end-r.time_start;fs=r.fs;samples=r.sample_count;end
             app.Controls.Metadata.Value={char("被试："+subject.subject_id);char("Session："+session.session_id);char("访视："+session.visit_label);char("状态："+session.status);sprintf('采样率：%.6g Hz | 样本：%d | 时长：%.3f s',fs,samples,duration);char("日期："+session.acquisition_date+" | 药物："+session.medication_state+" | 刺激："+session.stimulation_state)};
-            rows=cell(numel(session.channels),8);for k=1:numel(session.channels),c=session.channels(k);rows(k,:)={char(c.channel_id),char(c.original_label),char(c.display_label),char(c.side),char(c.region),char(c.contacts),char(c.reference),char(c.unit)};end;app.Controls.ChannelTable.Data=rows;app.Controls.DataContext.Text=char(subject.subject_id+" / "+session.session_id);
+            rows=cell(numel(session.channels),13);for k=1:numel(session.channels),c=session.channels(k);source="";if isfield(c,'source_metadata')&&isstruct(c.source_metadata)&&isfield(c.source_metadata,'source_file_name'),source=char(string(c.source_metadata.source_file_name));end;rows(k,:)={logical(get_field_local(c,'enabled',true)),char(c.channel_id),char(c.original_label),char(c.display_label),char(c.side),char(c.region),char(c.contacts),char(c.reference),double(get_field_local(c,'sampling_rate_hz',NaN)),double(get_field_local(c,'sample_count',0)),double(get_field_local(c,'time_end',NaN)-get_field_local(c,'time_start',NaN)),char(c.unit),source};end;app.Controls.ChannelTable.Data=rows;app.Controls.DataContext.Text=char(subject.subject_id+" / "+session.session_id);
             labels=app.channelLabels(session);if isempty(labels),labels="(无)";end;app.Controls.DataPreviewChannel.Items=cellstr(labels);app.Controls.DataPreviewChannel.Value=char(labels(1));app.Controls.AnalysisChannel.Items=cellstr(labels);app.Controls.AnalysisChannel.Value=char(labels(min(app.CurrentChannelIndex,numel(labels))));
             app.Controls.AnalysisContext.Text=char(subject.subject_id+" / "+session.visit_label+" / "+string(numel(session.channels))+" 通道 / "+sprintf('%.3f s',duration));app.refreshDataPreview();
         end
@@ -453,7 +489,19 @@ classdef LfpProjectApp < handle
         function refreshDataPreview(app)
             ax=app.Controls.DataPreviewAxes;cla(ax,'reset');if isempty(fieldnames(app.CurrentData)),text(ax,.5,.5,'当前对象没有可预览数据','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
             idx=find(string(app.Controls.DataPreviewChannel.Items)==string(app.Controls.DataPreviewChannel.Value),1);if isempty(idx),idx=1;end
-            [t,y,info]=lfp_downsample_envelope(double(app.CurrentData.time(:)),double(app.CurrentData.signal(:,idx)),12000);plot(ax,t,y,'k');grid(ax,'on');xlabel(ax,'时间 (s)');ylabel(ax,string(app.CurrentData.units));title(ax,string(app.Controls.DataPreviewChannel.Value),'Interpreter','none');suffix="";if info.downsampled,suffix=" | 显示用 min-max 抽稀";end;app.Controls.DataPreviewInfo.Text=char(string(size(app.CurrentData.signal,1))+" 样本"+suffix);
+            t=double(app.CurrentData.time(:)); y=double(app.CurrentData.signal(:,idx)); channelId="";
+            if strlength(app.CurrentSessionId)>0
+                [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
+                if ~isempty(session)&&idx<=numel(session.channels)
+                    channelId=string(session.channels(idx).channel_id);
+                    try
+                        channelData=lfp_project_get_channel_data(app.Project,app.CurrentSessionId,channelId);t=double(channelData.time(:));y=double(channelData.signal(:));
+                    catch exception
+                        app.Controls.DataPreviewInfo.Text=char("缓存错误："+string(exception.message));text(ax,.5,.5,'通道缓存不可用','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;
+                    end
+                end
+            end
+            [tPlot,yPlot,info]=lfp_downsample_envelope(t,y,12000);plot(ax,tPlot,yPlot,'k');grid(ax,'on');xlabel(ax,'时间 (s)');ylabel(ax,string(app.CurrentData.units));title(ax,string(app.Controls.DataPreviewChannel.Value),'Interpreter','none');suffix="";if info.downsampled,suffix=" | 显示用 min-max 抽稀";end;app.Controls.DataPreviewInfo.Text=char(string(numel(y))+" 样本"+suffix);
         end
 
         function refreshAnalysisView(app)
@@ -596,6 +644,7 @@ classdef LfpProjectApp < handle
             ids=app.CompareSelectedSessionIds(:);subjects=strings(numel(ids),1);mapping=repmat(struct('session_id',"",'channel_id',"",'channel_label',"",'target_label',"",'group_label',""),numel(ids),1);rows=app.Controls.MappingTable.Data;
             for i=1:numel(ids),[session,subject]=lfp_project_find_session(app.Project,ids(i));subjects(i)=subject.subject_id;chosen=string(rows{i,2});target=string(rows{i,3});labels=string({session.channels.original_label});display=string({session.channels.display_label});idx=find(labels==chosen|display==chosen,1);if isempty(idx),error('LFP:ChannelMappingMissing','Session %s 中不存在通道 %s。',ids(i),chosen);end
                 group="Group 1";if numel(app.CompareGroupLabels)>=i,group=string(app.CompareGroupLabels(i));end
+                if isfield(session.channels(idx),'enabled') && ~session.channels(idx).enabled, error('LFP:ChannelDisabled','Session %s 的通道 %s 已停用，不能加入比较。',ids(i),chosen); end
                 mapping(i)=struct('session_id',ids(i),'channel_id',string(session.channels(idx).channel_id),'channel_label',string(session.channels(idx).original_label),'target_label',target,'group_label',group);
             end
             type="between_subjects";if numel(unique(subjects))==1,type="within_subject";end
@@ -679,8 +728,8 @@ classdef LfpProjectApp < handle
             end
         end
         function showWelcome(app),app.Controls.Welcome.Visible='on';app.Controls.WorkspaceTabs.Visible='off';app.Controls.SaveProject.Enable='off';end
-        function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.applyConfigToControls();end
-        function clearSessionDisplay(app),app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.ChannelTable.Data=cell(0,8);app.Controls.Metadata.Value={'请选择项目节点。'};app.clearAnalysisAxes('请选择 Session。');app.refreshDataPreview();end
+        function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.CompareSelectedChannelKeys=strings(0,1);app.SelectedChannelRows=[];app.applyConfigToControls();end
+        function clearSessionDisplay(app),app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.ChannelTable.Data=cell(0,13);app.Controls.Metadata.Value={'请选择项目节点。'};app.clearAnalysisAxes('请选择 Session。');app.refreshDataPreview();end
         function clearAnalysisAxes(app,message),axesList=[app.Controls.RawAxes app.Controls.CleanAxes app.Controls.PsdAxes app.Controls.SpecModelAxes app.Controls.SpecPeakAxes app.Controls.BandAxes];for ax=axesList,cla(ax,'reset');text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');end;app.Controls.SpecQuality.Data=cell(0,2);app.Controls.BandResultTable.Data=cell(0,1);end
         function updateProjectHeader(app),if app.noProject(),return;end;app.Controls.ProjectTitle.Text=char(app.Project.name);app.Controls.ProjectTitle.Tooltip=char(app.Project.rootPath);app.Controls.SaveState.Text=local_choice(app.Dirty,'未保存','已保存');app.Controls.SaveProject.Enable='on';app.Controls.NavigationHint.Text='单击节点查看；比较对象在结果比较页单独勾选。';end
         function markDirty(app),app.Dirty=true;app.updateProjectHeader();end
@@ -723,4 +772,23 @@ elseif isstruct(bands)
     names=string(fieldnames(bands));
 end
 names=unique(names(strlength(names)>0),'stable');
+end
+
+function name = get_filename_local(path)
+[~,name,ext] = fileparts(char(path)); name = string([name ext]);
+end
+
+function suffix = local_append_suffix(appended)
+if appended, suffix = '（追加到当前 Session）'; else, suffix = ''; end
+end
+
+function value = get_field_local(source, name, fallback)
+if isstruct(source) && isfield(source, name) && ~isempty(source.(name)), value = source.(name); else, value = fallback; end
+end
+
+function value = get_cell_local(rows, row, column, fallback)
+value = fallback;
+if column <= size(rows, 2) && ~isempty(rows{row, column})
+    value = rows{row, column};
+end
 end

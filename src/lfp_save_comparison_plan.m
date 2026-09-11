@@ -13,6 +13,7 @@ plan.session_ids = string(get_field(comparisonSpec, 'session_ids', strings(0,1))
 plan.subject_ids = string(get_field(comparisonSpec, 'subject_ids', strings(0,1))); plan.subject_ids = plan.subject_ids(:);
 plan.visit_label = string(get_field(comparisonSpec, 'visit_label', ""));
 plan.channel_mapping = get_field(comparisonSpec, 'channel_mapping', struct([]));
+plan.channel_entries = plan.channel_mapping;
 plan.grouping_basis = string(get_field(comparisonSpec, 'grouping_basis', "custom"));
 plan.group_defs = get_field(comparisonSpec, 'group_defs', struct([]));
 plan.subject_count = numel(unique(plan.subject_ids));
