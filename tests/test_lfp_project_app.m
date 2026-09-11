@@ -58,6 +58,7 @@ verifyEqual(testCase,size(app.Controls.CandidateTable.Data,1),1);
 app.Controls.SelectedSessions.Value='S01';app.Controls.RemoveSelectedComparison.ButtonPushedFcn(app.Controls.RemoveSelectedComparison,[]);
 verifyEqual(testCase,app.CompareSelectedSessionIds,"S02");
 app.close(true);app=launchLfpProjectApp(Visible="off",ProjectRoot=root);
+reopenedCleanup=onCleanup(@()delete_if_valid(app)); %#ok<NASGU>
 verifyEqual(testCase,numel(app.Project.subjects),1);
 verifyEqual(testCase,numel(app.Project.subjects(1).sessions),2);
 verifyEqual(testCase,numel(app.Project.analysisRuns),2);
