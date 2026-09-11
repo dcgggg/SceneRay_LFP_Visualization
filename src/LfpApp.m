@@ -8,6 +8,7 @@ classdef LfpApp < handle
     properties
         Figure
         Config
+        Project = struct()
         UiStyle = struct('fontSize', 11, 'controlHeight', 32, ...
             'minimumWidth', 100, 'padding', [8 8 8 8], ...
             'labelFontSize', 11, 'buttonHeight', 32, ...
@@ -495,6 +496,40 @@ classdef LfpApp < handle
                 data.metadata.displayName = string(get_field_local(data.metadata, 'sourceFileName', "dataset"));
             end
             app.addDataset(data);
+        end
+
+        function project = createProject(app, projectRoot, projectName)
+            %CREATEPROJECT Create a persistent Project index for GUI data.
+            %   This is an optional data-management bridge; analysis remains
+            %   delegated to the script/API functions.
+            if nargin < 3 || strlength(string(projectName)) == 0, projectName = "LFP Project"; end
+            project = lfp_create_project(string(projectRoot), string(projectName), Config=app.Config);
+            app.Project = project;
+            app.logMessage("已创建项目：" + string(project.rootPath), "info");
+        end
+
+        function project = loadProject(app, projectRoot)
+            %LOADPROJECT Load a Project index without importing or rerunning data.
+            project = lfp_load_project(string(projectRoot));
+            app.Project = project;
+            app.logMessage("已加载项目：" + string(project.rootPath), "info");
+        end
+
+        function project = saveProject(app)
+            %SAVEPROJECT Persist the current Project index.
+            if isempty(fieldnames(app.Project)), error('LFP:NoProject', 'No project is open.'); end
+            project = app.Project;
+            lfp_save_project(project);
+        end
+
+        function [project, session] = addCurrentDatasetToProject(app, subjectId, sessionInfo)
+            %ADDCURRENTDATASETTOPROJECT Add the current GUI record as a Session.
+            %   The caller explicitly supplies subject/session metadata; no
+            %   patient or visit identity is inferred from the filename.
+            if isempty(fieldnames(app.Project)), error('LFP:NoProject', 'Create or load a Project first.'); end
+            if nargin < 3, sessionInfo = struct(); end
+            [project, session] = lfp_project_add_session(app.Project, string(subjectId), app.Data, sessionInfo);
+            app.Project = project;
         end
     end
 
