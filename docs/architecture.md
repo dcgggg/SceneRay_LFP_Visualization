@@ -10,9 +10,9 @@
 6. **Band analysis** — total, relative, aperiodic, and periodic-above-aperiodic power.
 7. **Visualization** — figures consume result structures and do not run hidden analysis.
 8. **Export** — tables, MAT files, figures, and a processing log with parameters and software information.
-9. **GUI** — the MATLAB-native `LfpApp`/`launchLfpApp` layer. It owns import confirmation, parameter controls, run snapshots, cache/expiry status, result tabs and save actions, while calling the same public analysis functions as scripts.
-10. **Dataset manager** — the GUI keeps each CSV as an independent `Datasets(k)` record with canonical arrays and an `analysisResults` struct. Checkbox selection drives sequential per-dataset runs; files are never concatenated for PSD or parameterization.
-11. **Task manager** — `LfpAnalysisTaskManager` owns stage progress, elapsed-time records and cooperative cancellation. Algorithms receive temporary callbacks through `cfg`; callbacks are stripped before results are persisted.
+9. **GUI** — `launch_gui` creates one `LfpProjectApp` controller with an empty welcome state, a stable-ID navigation tree and three task-specific pages. It calls public import/project/analysis/comparison functions; rendering reads cached results and never launches hidden analysis. `launchLfpApp` remains a legacy single-file compatibility entry.
+10. **Legacy dataset manager** — `launchLfpApp` retains the previous independent `Datasets(k)` workflow for compatibility. It is not the primary project GUI and never shares live state with `LfpProjectApp`.
+11. **Legacy task manager** — `LfpAnalysisTaskManager` remains available to the compatibility GUI. The project GUI calls the project analysis dispatcher and exposes cooperative cancellation at its progress checkpoints.
 12. **Project platform** — `lfp_create_project`, `lfp_project_add_subject` and `lfp_project_add_session` implement the stable `Project -> Subject -> Session -> Channel` index. Raw records are stored as one file per Session under `data/`; the index remains lightweight.
 13. **AnalysisRun/cache** — `lfp_analyze_project` runs Sessions independently, creates versioned run metadata and derived result files under `results/`, and reuses a run only when both the content-sensitive data version and computation-only configuration fingerprint match.
 14. **Comparison/query** — `lfp_compare_project` reads saved band-power results into an explicit long table and records comparison type, Session IDs, visit labels, run IDs and configuration compatibility. It never concatenates raw signals or treats epochs/channels as independent subjects. `plotProjectComparison` renders the table as Session-level points without inferential statistics.
@@ -37,8 +37,8 @@ The GUI takes a run snapshot containing the selected channels, analysis range, m
 
 The raw signal remains in the data model and is never overwritten by a derived signal.
 
-Project persistence is intentionally separate from GUI state. `project.mat` contains metadata, stable IDs, configuration and result references; `data/<session_id>.mat` contains the canonical raw arrays; `results/<run_id>.mat` contains derived analysis outputs; and `comparisons/<comparison_id>.mat` contains reproducible comparison tables. A project can therefore be reopened without importing or recomputing successful runs.
+Project persistence is intentionally separate from transient GUI handles. `project.mat` contains metadata, stable IDs, configuration, saved comparison plans and result references; `data/<session_id>.mat` contains the canonical raw arrays; `results/<run_id>.mat` contains derived analysis outputs; and `comparisons/<comparison_id>.mat` contains reproducible comparison tables. A project can therefore be reopened without importing or recomputing successful runs.
 
-The GUI `AppState` records selected dataset indices, selected channels, the active analysis stage, current result handles and plot settings. Dataset/channel selectors in the Raw, PSD and specparam tabs update the active record and redraw only the corresponding result views where possible.
+`LfpProjectApp` keeps the current project, subject ID, Session ID, channel index, comparison selection, cached run and dirty/busy state in one controller. Tree and table rows carry stable IDs, so filtering and ordering do not change object identity. Result tabs consume the currently loaded Session run; switching to a Session without results clears the previous plots.
 
-Result tabs use lazy rendering. Numeric cache validity follows Data → Artifact → PSD → specparam → Band power, while plot-dirty state is separate. Raw plotting may use `lfp_downsample_envelope` for display only; this cannot alter `data.signal`, PSD input, artifact masks, or exported canonical arrays.
+The compatibility GUI keeps its own `AppState`. Both GUIs may use `lfp_downsample_envelope` for display only; this cannot alter `data.signal`, PSD input, artifact masks, or exported canonical arrays.

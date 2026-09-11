@@ -2,7 +2,7 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
-当前本地开发版本：**v0.9.0**。本版本移除时频分析链路，修复 specparam 与频带功率协作、结果状态和频段越界标记，并保留多 CSV 数据集管理、PSD 显示模式、Gaussian 峰分解、分组频段比较及大文件导入优化。新增可选的 Project→Subject→Session→Channel 数据管理、AnalysisRun 版本缓存、比较长表和 GUI-free 批处理入口。
+当前本地开发版本：**v0.10.0-dev**。主入口已重构为 Project→Subject→Session→Channel 项目工作区，支持从空白界面完成建项目、导入、单次分析、跨 Session 比较、导出与恢复。原有分析算法、AnalysisRun 缓存和批处理接口保持独立可调用。
 
 ## 目标
 
@@ -11,7 +11,7 @@
 - 计算 PSD、总功率、相对功率和周期功率；
 - 分离周期峰与非周期背景；
 - 输出可追溯的参数、结果、图片和处理日志；
-- 后续阶段可提供 MATLAB 原生 GUI，但算法核心始终可由脚本直接调用。
+- 通过 MATLAB 原生 GUI 或脚本调用同一套分析核心。
 
 ## 环境
 
@@ -37,9 +37,34 @@ EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会�
 
 ## 当前状态
 
-当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam 参数化、Gaussian 周期峰、频带功率点图、伪影/PSD/模型图、结果导出以及 MATLAB 原生 GUI。GUI 现在可以一次选择多个 CSV；每个文件作为独立 dataset 保存时间、信号、通道、采样率、元数据和 `analysisResults`，运行时逐个完成分析，禁止跨文件拼接计算 PSD。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、方向、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
+当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam 参数化、Gaussian 周期峰、频带功率点图、结果导出以及 MATLAB 原生项目 GUI。主界面把每份记录绑定到明确的 Subject/Session，Session 内保留同步的 samples × channels 数组，禁止跨记录拼接计算 PSD。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
 
 项目不调用 Python 封装；FieldTrip/原生 MATLAB 路径保持纯 MATLAB 运行。
+
+## 快速启动 GUI
+
+在 MATLAB 中把“当前文件夹”切换到仓库根目录，然后只运行：
+
+```matlab
+app = launch_gui;
+```
+
+无需预先创建变量、导入数据或切换到 `src/`。空白启动页不会自动加载示例数据，也不会强制弹出导入窗口。随后按以下顺序操作：
+
+1. 新建项目或打开包含 `project.mat` 的项目目录；
+2. 添加被试，再为被试添加无数据的 Session；
+3. 选中 Session 后导入 CSV，在预览窗口确认采样率、时间列和信号列；
+4. 在“单次分析”页运行伪影、PSD、specparam 和频带功率；
+5. 在“结果比较”页独立勾选 Session，确认每条记录的通道映射后比较或导出；
+6. 保存并关闭；下次打开时恢复项目、AnalysisRun 和最近保存的比较方案。
+
+![空白启动页](docs/images/gui/01-welcome.png)
+
+![单次分析页](docs/images/gui/04-session-analysis.png)
+
+![被试内比较页](docs/images/gui/05-within-subject-comparison.png)
+
+![小窗口比较页](docs/images/gui/07-small-window-comparison.png)
 
 ## 快速分析
 
@@ -86,40 +111,30 @@ files = lfp_export_comparison(comparison, "comparison_output");
 
 `lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
 
-当前项目管理 API 已可由脚本调用；现有 GUI 的单次分析工作区保持兼容。Subject/Session 树形管理和比较工作区将在后续增量版本接入，暂不改变现有 GUI 分析入口。
+项目管理 API 与 GUI 使用相同的稳定 ID、数据文件和结果缓存；GUI 不把不同 Session 的原始信号拼接计算。
 
 ## MATLAB 原生 GUI
 
-在 MATLAB 命令窗口中从仓库根目录运行：
+推荐入口：
 
 ```matlab
-addpath('src');
-app = launchLfpApp;
+app = launch_gui;
 ```
 
-项目工作区可独立启动：
+兼容入口仍可使用：
 
 ```matlab
 projectApp = launchLfpProjectApp;
+legacySingleFileApp = launchLfpApp;
 ```
 
-该窗口提供“数据管理、单次分析、结果比较”三个基础工作区；核心计算仍由脚本 API 执行，关闭窗口不会删除项目数据。
+`launchLfpProjectApp` 指向同一个项目主界面；`launchLfpApp` 仅保留旧的单文件兼容工作流。项目主界面固定包含顶部项目工具栏、左侧稳定 ID 导航树、数据管理/单次分析/结果比较三个工作页和底部状态栏。比较候选可按被试、访视及分析状态筛选，多选独立于左侧当前查看节点，筛选不会清除已有选择。窗口变窄时主界面自动收起导航，并通过顶部“打开导航/返回工作区”切换，避免关键结果与导出按钮被裁切。
 
-GUI 工作流为“导入 CSV → 预览并确认格式 → 选择通道和分析时间 → 调整参数 → 勾选模块 → 运行所选分析 → 查看图形/表格 → 保存配置或结果”。结果页包含：
+主 GUI 的结果页包含全记录原始/伪影显示、PSD、specparam 模型与峰分解、频带功率。计算结果按 `AnalysisRun` 版本保存；切换 Session 或通道只读取相应缓存并重绘，没有结果时显示空状态。比较页保存对象清单、通道映射、指标、频段和实际结果版本；缺失值保持为 NaN，不补零，不自动执行显著性检验。
 
-- **原始与伪迹**：全记录 Raw/Clean（伪迹样本以 NaN 断线）、伪迹色块和事件表；
-- **PSD**：有效窗口数量、频率分辨率、去伪迹前后 PSD 对照；
-- **specparam**：原始谱、完整模型、非周期背景、周期峰、offset/exponent/knee/R²/误差和峰参数表；
-- **频段功率**：可编辑频段表、按频段或按通道分面的通道点图，不伪造误差条；
-- **PSD**：支持单通道、多通道和 subplot 显示，可切换显示伪迹前 PSD；
-- **specparam**：支持数据集/通道选择，并显示各 Gaussian 峰分量及其总和；
-- **频段功率**：单数据集按频段/通道分面，多数据集使用 grouped bar 比较；已移除旧的“摘要”页。
+导入预览只读取有限行；通用数值 CSV 使用 `readmatrix`，SceneRay 多块文件使用一次流式解析。运行时显示阶段和进度，取消请求会在当前原生计算块的下一个检查点生效。配置指纹只包含计算参数；数据版本或计算参数变化时生成新结果版本，图形样式变化不会触发分析。
 
-“分析时间范围”和“波形显示范围”彼此独立。修改颜色、坐标或显示范围后使用“重新绘图”；修改 PSD、specparam、频段或伪迹参数会标记结果过期，必须重新运行。GUI 中的“伪迹重建”暂时禁用，默认只保存原始数据、mask、事件和 NaN 显示副本。没有有效时间列或时间间隔不规则时，GUI 会阻止需要均匀采样的 PSD 分析，并提示修正导入设置。
-
-导入预览只读取有限行；通用数值 CSV 使用 `readmatrix`，SceneRay 多块文件使用一次流式解析。运行分析时会显示当前阶段、进度和耗时，取消按钮会在原生算法的下一个通道/窗口检查点安全停止。结果页采用延迟绘图，只有打开的标签页会绘制。仅改变显示参数不会重算 PSD；改变上游计算参数时，缓存会沿 Data → Artifact → PSD → specparam → Band power 依赖链失效。
-
-GUI 也支持保存/加载 `cfg` 配置、保存完整 MAT 结果、导出标准 `signal_data.csv`、`psd.csv`、band-power/processing-history CSV 和 PNG 总览图。结果页提供保存图像（PNG/SVG/FIG）和保存当前视图数据（MAT）按钮，保存内容包含数据集、通道、参数快照和时间戳。自动保存选项使用带时间戳的子目录，不覆盖已有结果；完整 MAT 会同时保留导入映射、单位、PSD/specparam 参数与 processingHistory。
+旧的 `launchLfpApp` 仍保留多文件单机分析界面和旧会话兼容能力，但新项目应使用 `launch_gui`；两个入口不会共享一份活动 GUI 状态。
 
 v0.6.1 还包含以下 GUI 稳定性修复：CSV 预览、信息栏、伪迹事件表和频段结果表会将字符串/分类值转换为 `uitable` 可显示的字符值，但不会修改原始导入数据或分析结果表；确认导入时会复用已经完成预览的 CSV 内容，SceneRay 数据行解析也采用预分配方式以减少大文件导入耗时。
 

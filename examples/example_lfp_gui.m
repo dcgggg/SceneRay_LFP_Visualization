@@ -4,5 +4,5 @@
 
 thisFile = mfilename('fullpath');
 projectRoot = fileparts(fileparts(thisFile));
-addpath(fullfile(projectRoot, 'src'));
-app = launchLfpApp(ProjectRoot=projectRoot); %#ok<NASGU>
+addpath(projectRoot);
+app = launch_gui; %#ok<NASGU>

@@ -58,6 +58,14 @@ display labels change. Channel strings such as `channel01` retain leading
 zeros; bipolar labels remain their original labels until a user-provided
 mapping specifies side, region, contacts or reference.
 
+The GUI uses a metadata-first workflow: `lfp_project_add_empty_session`
+creates a stable Session with status `no_data`, and
+`lfp_project_attach_data` later attaches one canonical synchronized record.
+Removing a Subject or Session from the project index does not delete the
+original CSV or the project's stored data/result files. Editable display labels,
+side, region, contacts and reference can be edited without changing
+`channel_id` or `original_label`.
+
 For a direct import bridge, `lfp_project_add_csv_session` accepts either the
 SceneRay block format or explicit generic-CSV import settings. It never
 derives patient or visit identity from a filename.

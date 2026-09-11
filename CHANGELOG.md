@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Rebuilt the MATLAB-native GUI as a zero-input project workspace launched by `launch_gui`.
+- Added a welcome state, persistent project toolbar, stable-ID Subject/Session tree, focused data/analysis/comparison pages and a compact status bar.
+- Added metadata-first Session creation, CSV preview confirmation, editable channel display metadata and non-destructive index removal.
+- Added cached raw/PSD/specparam/band result views, explicit result-version status and independent Session/channel comparison selection.
+- Added saved comparison plans, explicit per-Session channel mapping, project reopen restoration and seven MATLAB-rendered GUI acceptance screenshots.
+- Added comparison filtering by subject, visit and analysis status, per-item removal, and a compact-width navigation switch so export actions remain reachable.
+- Corrected comparison row selection and computation-config fingerprints so labels, values and cached result versions stay aligned.
 - Added a persistent `Project -> Subject -> Session -> Channel` data model with stable IDs and per-Session raw-data references.
 - Added versioned `AnalysisRun` persistence, content-sensitive data/config fingerprints, independent Session analysis and cache reuse.
 - Added explicit comparison long tables, legacy migration preview/entry points and a GUI-free batch runner with a project write lock.
