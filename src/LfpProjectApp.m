@@ -7,7 +7,12 @@ classdef LfpProjectApp < handle
         CurrentSubjectId = ""
         CurrentSessionId = ""
         CurrentChannelIndex = 1
+        CurrentViewedChannelId = ""
         SelectedChannelRows = []
+        SelectedChannelIds = strings(0,1)
+        DisplayChannelIds = strings(0,1)
+        DisplaySelectionExplicit = false
+        AnalysisSnapshot = struct()
         CurrentRun = struct()
         CurrentResults = struct()
         CurrentData = struct()
@@ -123,17 +128,25 @@ classdef LfpProjectApp < handle
         function selectSession(app,sessionId)
             [session,subject]=lfp_project_find_session(app.Project,string(sessionId));
             if isempty(session), return; end
-            app.CurrentSessionId=string(sessionId); app.CurrentSubjectId=string(subject.subject_id); app.CurrentChannelIndex=1;
+            app.CurrentSessionId=string(sessionId); app.CurrentSubjectId=string(subject.subject_id); app.CurrentChannelIndex=1; app.CurrentViewedChannelId=""; app.DisplayChannelIds=strings(0,1); app.DisplaySelectionExplicit=false;
             app.loadCurrentSession(); app.updateSessionContext(session,subject); app.refreshAnalysisView();
         end
 
         function summary=runSelectedAnalysis(app)
+            if app.Busy, error('LFP:AnalysisBusy','已有分析任务正在运行，请等待其结束或先取消。'); end
             if strlength(app.CurrentSessionId)==0, error('LFP:NoSessionSelected','请先选择 Session。'); end
             [session,~,~,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
             if isempty(session)||isempty(session.data_refs), error('LFP:SessionHasNoData','当前 Session 尚未导入数据。'); end
+            enabledMask=true(1,numel(session.channels));
+            if ~isempty(session.channels)&&isfield(session.channels,'enabled'), enabledMask=logical([session.channels.enabled]); end
+            enabledIds=string({session.channels(enabledMask).channel_id})';
+            if isempty(enabledIds), error('LFP:NoEnabledChannels','当前 Session 没有启用通道。请先在数据管理页启用至少一个通道。'); end
             cfg=app.readAnalysisConfig(); app.Busy=true; app.CancelRequested=false; app.updateBusyState();
+            app.AnalysisSnapshot=struct('subject_id',app.CurrentSubjectId,'session_id',app.CurrentSessionId, ...
+                'channel_ids',enabledIds,'data_version',string(session.data_version),'config_id',lfp_config_fingerprint(cfg), ...
+                'created_at',string(datestr(now,31)));
             cleanup=onCleanup(@()app.finishTask()); %#ok<NASGU>
-            app.setStatus("运行中","正在分析 "+app.CurrentSessionId,.02); drawnow;
+            app.setStatus("运行中","正在分析 "+app.CurrentSessionId+"（"+string(numel(enabledIds))+" 个启用通道）",.02); drawnow;
             [app.Project,summary]=lfp_analyze_project(app.Project,app.CurrentSessionId,Config=cfg, ...
                 ComputeSpecparam=app.Controls.ModuleSpecparam.Value,ComputeBandPower=app.Controls.ModuleBand.Value, ...
                 Save=true,ProgressCallback=@(p,m)app.progressUpdate(p,m));
@@ -145,7 +158,13 @@ classdef LfpProjectApp < handle
                 warnings=string(summary(1).warnings);warnings=warnings(~ismissing(warnings)&strlength(warnings)>0);
                 message="部分模块未完成；详情见结果版本和日志。";if ~isempty(warnings),message=join(warnings,"；");end
                 app.setStatus("部分失败",message,1);
-            else, app.setStatus("完成","结果已自动保存（"+status+"）。",1); end
+            else
+                suffix="";
+                if isfield(summary(1),'summary') && isstruct(summary(1).summary)
+                    s=summary(1).summary; if isfield(s,'successful_channel_count'),suffix="；成功 "+string(s.successful_channel_count)+"，复用 "+string(get_field_local(s,'reused_channel_count',0))+"，失败 "+string(get_field_local(s,'failed_channel_count',0));end
+                end
+                app.setStatus("完成","结果已自动保存（"+status+"）"+suffix+"。",1);
+            end
         end
 
         function comparison=compareSelected(app,unify)
@@ -193,7 +212,7 @@ classdef LfpProjectApp < handle
             app.Controls.ProjectTree=uitree(g,'SelectionChangedFcn',@(~,~)app.onTreeSelection());
             p=uigridlayout(g,[1 3]);p.ColumnWidth={'1x','1x','1x'};p.Padding=[0 0 0 0];
             uibutton(p,'Text','数据管理','ButtonPushedFcn',@(~,~)app.showWorkspace("data"));
-            uibutton(p,'Text','单次分析','ButtonPushedFcn',@(~,~)app.showWorkspace("analysis"));
+            uibutton(p,'Text','分析参数与结果','ButtonPushedFcn',@(~,~)app.showWorkspace("analysis"));
             uibutton(p,'Text','结果比较','ButtonPushedFcn',@(~,~)app.showWorkspace("compare"));
             app.Controls.NavigationHint=uilabel(g,'Text','请先新建或打开项目。','WordWrap','on','FontColor',[.35 .35 .35]);
         end
@@ -210,7 +229,7 @@ classdef LfpProjectApp < handle
             hint=uilabel(wg,'Text','项目将按 Subject → Session → Channel 组织，并保留原始数据。','HorizontalAlignment','center','WordWrap','on','FontColor',[.45 .45 .45]);hint.Layout.Row=4;hint.Layout.Column=2;
             app.Controls.WorkspaceTabs=uitabgroup(hg,'Visible','off','SelectionChangedFcn',@(~,~)app.onWorkspaceTabChanged());
             app.Controls.WorkspaceTabs.Layout.Row=1;app.Controls.WorkspaceTabs.Layout.Column=1;
-            app.Controls.DataTab=uitab(app.Controls.WorkspaceTabs,'Title','数据管理');app.Controls.AnalysisTab=uitab(app.Controls.WorkspaceTabs,'Title','单次分析');app.Controls.CompareTab=uitab(app.Controls.WorkspaceTabs,'Title','结果比较');
+            app.Controls.DataTab=uitab(app.Controls.WorkspaceTabs,'Title','数据管理');app.Controls.AnalysisTab=uitab(app.Controls.WorkspaceTabs,'Title','分析参数与结果');app.Controls.CompareTab=uitab(app.Controls.WorkspaceTabs,'Title','结果比较');
             app.buildDataPage(app.Controls.DataTab);app.buildAnalysisPage(app.Controls.AnalysisTab);app.buildComparePage(app.Controls.CompareTab);
         end
 
@@ -229,27 +248,34 @@ classdef LfpProjectApp < handle
             app.Controls.ChannelTable=uitable(cg,'Data',cell(0,13),'ColumnName',{'启用','ID','原始名称','显示名称','侧别','脑区','触点','参考','采样率(Hz)','样本数','时长(s)','单位','来源文件'}, ...
                 'ColumnEditable',[true false false true true true true true false false false false false],'RowName',[],'CellSelectionCallback',@(~,e)app.selectChannelRows(e),'CellEditCallback',@(~,~)app.saveChannelEdits());
             foot=uigridlayout(cg,[1 4]);foot.ColumnWidth={90,90,90,'1x'};foot.Padding=[0 0 0 0];app.Controls.EnableChannels=uibutton(foot,'Text','启用所选','ButtonPushedFcn',@(~,~)app.setSelectedChannelsEnabled(true));app.Controls.DisableChannels=uibutton(foot,'Text','停用所选','ButtonPushedFcn',@(~,~)app.setSelectedChannelsEnabled(false));app.Controls.RemoveChannels=uibutton(foot,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedChannels());app.Controls.ChannelHint=uilabel(foot,'Text','停用不删除数据；移除仅更新活动通道索引，缓存保留。','FontColor',[.35 .35 .35]);
-            pp=uipanel(content,'Title','完整记录预览');pg=uigridlayout(pp,[2 1]);pg.RowHeight={34,'1x'};pg.Padding=[4 4 4 4];
-            top=uigridlayout(pg,[1 3]);top.ColumnWidth={70,180,'1x'};top.Padding=[0 0 0 0];uilabel(top,'Text','通道');
-            app.Controls.DataPreviewChannel=uidropdown(top,'Items',{'(无)'},'ValueChangedFcn',@(~,~)app.refreshDataPreview());app.Controls.DataPreviewInfo=uilabel(top,'Text','','HorizontalAlignment','right');
-            app.Controls.DataPreviewAxes=uiaxes(pg);
+            pp=uipanel(content,'Title','启用通道完整记录预览');pg=uigridlayout(pp,[2 1]);pg.RowHeight={34,'1x'};pg.Padding=[4 4 4 4];
+            top=uigridlayout(pg,[1 2]);top.ColumnWidth={'1x','1x'};top.Padding=[0 0 0 0];
+            app.Controls.DataPreviewInfo=uilabel(top,'Text','暂无启用通道','HorizontalAlignment','left','WordWrap','on');
+            app.Controls.DataPreviewHint=uilabel(top,'Text','每个通道使用自己的时间轴；仅显示抽稀，不改变分析数据。','HorizontalAlignment','right','WordWrap','on','FontColor',[.35 .35 .35]);
+            app.Controls.DataPreviewPanel=uipanel(pg,'BorderType','none');
+            if isprop(app.Controls.DataPreviewPanel,'Scrollable'),app.Controls.DataPreviewPanel.Scrollable='on';end
+            app.Controls.DataPreviewGrid=uigridlayout(app.Controls.DataPreviewPanel,[1 1]);app.Controls.DataPreviewGrid.Padding=[2 2 2 2];
+            app.Controls.DataPreviewAxes=gobjects(0);
+            % Retained as a compatibility handle for scripts written against older releases.
+            app.Controls.DataPreviewChannel=uidropdown(pp,'Items',{'(全部启用通道)'},'Value','(全部启用通道)','Visible','off','Position',[0 0 1 1]);
         end
 
         function buildAnalysisPage(app,parent)
             g=uigridlayout(parent,[5 1]);g.RowHeight={34,38,132,42,'1x'};g.Padding=[8 8 8 8];g.RowSpacing=5;
-            app.Controls.AnalysisContext=uilabel(g,'Text','请选择包含数据的 Session。','FontWeight','bold');
+            app.Controls.AnalysisContext=uilabel(g,'Text','请选择包含数据的 Session。','FontWeight','bold','WordWrap','on');
             m=uigridlayout(g,[1 6]);m.ColumnWidth={95,95,110,110,'1x',170};m.Padding=[0 0 0 0];
             app.Controls.ModuleArtifact=uicheckbox(m,'Text','伪影处理','Value',true,'Enable','off','Tooltip','固定前置步骤');
             app.Controls.ModulePsd=uicheckbox(m,'Text','PSD','Value',true,'Enable','off','Tooltip','固定前置步骤');
             app.Controls.ModuleSpecparam=uicheckbox(m,'Text','specparam','Value',true);app.Controls.ModuleBand=uicheckbox(m,'Text','频带功率','Value',true);uilabel(m,'Text','');
             app.Controls.AnalysisChannel=uidropdown(m,'Items',{'(无)'},'ValueChangedFcn',@(~,~)app.onAnalysisChannelChanged());
             app.buildAnalysisSettings(g);
-            r=uigridlayout(g,[1 7]);r.ColumnWidth={130,80,95,110,110,'1x',210};r.Padding=[0 0 0 0];
-            app.Controls.RunSession=uibutton(r,'Text','运行所选分析','ButtonPushedFcn',@(~,~)app.onRun());
+            r=uigridlayout(g,[1 8]);r.ColumnWidth={170,80,90,110,110,150,'1x',150};r.Padding=[0 0 0 0];
+            app.Controls.RunSession=uibutton(r,'Text','分析全部启用通道','ButtonPushedFcn',@(~,~)app.onRun(),'Tooltip','按当前 Session 中启用的通道 ID 批量分析，不受当前查看通道影响。');
             app.Controls.Cancel=uibutton(r,'Text','取消','Enable','off','ButtonPushedFcn',@(~,~)app.requestCancel());
             uibutton(r,'Text','查看日志','ButtonPushedFcn',@(~,~)app.showLog());
             app.Controls.SaveFigure=uibutton(r,'Text','保存图片','ButtonPushedFcn',@(~,~)app.saveCurrentFigure());app.Controls.SaveResult=uibutton(r,'Text','保存数据','ButtonPushedFcn',@(~,~)app.saveCurrentData());
-            app.Controls.AnalysisState=uilabel(r,'Text','未运行','HorizontalAlignment','right');app.Controls.ResultVersion=uilabel(r,'Text','结果：无','HorizontalAlignment','right');
+            app.Controls.AnalysisState=uilabel(r,'Text','未运行','HorizontalAlignment','right','WordWrap','on');app.Controls.ResultVersion=uilabel(r,'Text','结果：无','HorizontalAlignment','right','WordWrap','on');
+            app.Controls.AnalysisEnabledCount=uilabel(r,'Text','启用 0 通道','HorizontalAlignment','right','WordWrap','on');
             app.buildAnalysisResults(g);
         end
 
@@ -262,9 +288,13 @@ classdef LfpProjectApp < handle
             uilabel(p,'Text','NW');app.Controls.PsdNW=uieditfield(p,'numeric','Value',3.5);uilabel(p,'Text','K');app.Controls.PsdK=uieditfield(p,'numeric','Value',6);uilabel(p,'Text','重叠');app.Controls.PsdOverlap=uieditfield(p,'numeric','Value',.5);
             st=uitab(tabs,'Title','specparam');s=uigridlayout(st,[2 8]);s.RowHeight={34,34};s.ColumnWidth={70,80,70,80,70,80,80,90};
             uilabel(s,'Text','模型');app.Controls.SpecMode=uidropdown(s,'Items',{'fixed','knee'},'Value','fixed');uilabel(s,'Text','下限 Hz');app.Controls.SpecLow=uieditfield(s,'numeric','Value',1);uilabel(s,'Text','上限 Hz');app.Controls.SpecHigh=uieditfield(s,'numeric','Value',35);uilabel(s,'Text','最大峰数');app.Controls.SpecPeaks=uieditfield(s,'numeric','Value',6);
-            bt=uitab(tabs,'Title','频带功率');b=uigridlayout(bt,[2 1]);b.RowHeight={'1x',36};b.Padding=[4 4 4 4];
+            bt=uitab(tabs,'Title','频带功率');b=uigridlayout(bt,[3 1]);b.RowHeight={'1x',110,36};b.Padding=[4 4 4 4];
             app.Controls.BandTable=uitable(b,'Data',band_table_data(lfpDefaultConfig().bands),'ColumnName',{'启用','频段名称','下限 (Hz)','上限 (Hz)'},'ColumnEditable',[true true true true],'RowName',[],'CellEditCallback',@(~,~)app.markDirty());
-            bb=uigridlayout(b,[1 4]);bb.ColumnWidth={110,130,'1x',220};bb.Padding=[0 0 0 0];app.Controls.ResetBands=uibutton(bb,'Text','恢复默认频段','ButtonPushedFcn',@(~,~)app.resetBandTable());app.Controls.SaveBandTemplate=uibutton(bb,'Text','保存为项目模板','ButtonPushedFcn',@(~,~)app.saveBandTemplate());uilabel(bb,'Text','显示指标');app.Controls.BandMetric=uidropdown(bb,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower','ValueChangedFcn',@(~,~)app.refreshAnalysisView());
+            dcp=uipanel(b,'Title','频带图显示通道（不改变启用状态）');dg=uigridlayout(dcp,[1 3]);dg.ColumnWidth={'1x',100,100};dg.Padding=[4 4 4 4];
+            app.Controls.DisplayChannelList=uilistbox(dg,'Items',{'(无)'},'Value',{'(无)'},'Multiselect','on','ValueChangedFcn',@(~,~)app.onDisplayChannelsChanged());
+            app.Controls.DisplayAllChannels=uibutton(dg,'Text','全选有效','ButtonPushedFcn',@(~,~)app.selectAllDisplayChannels());
+            app.Controls.ClearDisplayChannels=uibutton(dg,'Text','清空显示','ButtonPushedFcn',@(~,~)app.clearDisplayChannels());
+            bb=uigridlayout(b,[1 4]);bb.ColumnWidth={110,130,90,'1x'};bb.Padding=[0 0 0 0];app.Controls.ResetBands=uibutton(bb,'Text','恢复默认频段','ButtonPushedFcn',@(~,~)app.resetBandTable());app.Controls.SaveBandTemplate=uibutton(bb,'Text','保存为项目模板','ButtonPushedFcn',@(~,~)app.saveBandTemplate());uilabel(bb,'Text','显示指标');app.Controls.BandMetric=uidropdown(bb,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower','ValueChangedFcn',@(~,~)app.refreshAnalysisView());
         end
 
         function buildAnalysisResults(app,parent)
@@ -272,7 +302,7 @@ classdef LfpProjectApp < handle
             app.Controls.RawResultTab=uitab(tabs,'Title','原始信号与伪影');r=uigridlayout(app.Controls.RawResultTab,[2 1]);r.RowHeight={'1x','1x'};app.Controls.RawAxes=uiaxes(r);app.Controls.CleanAxes=uiaxes(r);
             app.Controls.PsdResultTab=uitab(tabs,'Title','PSD');pg=uigridlayout(app.Controls.PsdResultTab,[1 1]);pg.Padding=[8 8 8 8];app.Controls.PsdAxes=uiaxes(pg);
             app.Controls.SpecResultTab=uitab(tabs,'Title','specparam');s=uigridlayout(app.Controls.SpecResultTab,[2 2]);s.RowHeight={'1x','1x'};s.ColumnWidth={'1x',240};app.Controls.SpecModelAxes=uiaxes(s);app.Controls.SpecPeakAxes=uiaxes(s);app.Controls.SpecPeakAxes.Layout.Row=2;app.Controls.SpecQuality=uitable(s,'Data',cell(0,2),'ColumnName',{'参数','值'},'RowName',[]);app.Controls.SpecQuality.Layout.Row=[1 2];app.Controls.SpecQuality.Layout.Column=2;
-            app.Controls.BandResultTab=uitab(tabs,'Title','频带功率');b=uigridlayout(app.Controls.BandResultTab,[1 2]);b.ColumnWidth={'1x',420};app.Controls.BandAxes=uiaxes(b);app.Controls.BandResultTable=uitable(b,'Data',cell(0,1),'RowName',[]);
+            app.Controls.BandResultTab=uitab(tabs,'Title','频带功率');b=uigridlayout(app.Controls.BandResultTab,[1 2]);b.ColumnWidth={'1x',420};app.Controls.BandPlotPanel=uipanel(b,'BorderType','none');app.Controls.BandPlotGrid=uigridlayout(app.Controls.BandPlotPanel,[1 1]);app.Controls.BandAxes=gobjects(0);app.Controls.BandResultTable=uitable(b,'Data',cell(0,1),'RowName',[]);
         end
 
         function buildComparePage(app,parent)
@@ -428,20 +458,32 @@ classdef LfpProjectApp < handle
         end
 
         function selectChannelRows(app, event)
-            if isempty(event.Indices), app.SelectedChannelRows=[]; else, app.SelectedChannelRows=unique(event.Indices(:,1)); end
+            if isempty(event.Indices)
+                app.SelectedChannelRows=[]; app.SelectedChannelIds=strings(0,1);
+            else
+                app.SelectedChannelRows=unique(event.Indices(:,1)); rows=app.Controls.ChannelTable.Data;
+                valid=app.SelectedChannelRows>=1 & app.SelectedChannelRows<=size(rows,1);
+                app.SelectedChannelRows=app.SelectedChannelRows(valid);
+                app.SelectedChannelIds=string(rows(app.SelectedChannelRows,2));
+            end
         end
 
         function setSelectedChannelsEnabled(app, enabled)
-            if strlength(app.CurrentSessionId)==0 || isempty(app.SelectedChannelRows), app.warn('请先在通道表中选择一个或多个通道。'); return; end
-            rows=app.Controls.ChannelTable.Data; ids=strings(numel(app.SelectedChannelRows),1);
-            for k=1:numel(app.SelectedChannelRows), ids(k)=string(rows{app.SelectedChannelRows(k),2}); end
+            if strlength(app.CurrentSessionId)==0, app.warn('请先选择 Session。'); return; end
+            ids=app.SelectedChannelIds;
+            if isempty(ids) && ~isempty(app.SelectedChannelRows)
+                rows=app.Controls.ChannelTable.Data;ids=string(rows(app.SelectedChannelRows,2));
+            end
+            if isempty(ids), app.warn('请先在通道表中选择一个或多个通道。'); return; end
             tbl=table(ids,'VariableNames',{'channel_id'}); tbl.enabled=repmat(logical(enabled),numel(ids),1);
             [app.Project,~]=lfp_project_update_channels(app.Project,app.CurrentSessionId,tbl,Save=false); app.markDirty(); app.loadCurrentSession(); app.refreshProject();
         end
 
         function removeSelectedChannels(app)
-            if strlength(app.CurrentSessionId)==0 || isempty(app.SelectedChannelRows), app.warn('请先在通道表中选择一个或多个通道。'); return; end
-            rows=app.Controls.ChannelTable.Data;ids=strings(numel(app.SelectedChannelRows),1);for k=1:numel(app.SelectedChannelRows),ids(k)=string(rows{app.SelectedChannelRows(k),2});end
+            if strlength(app.CurrentSessionId)==0, app.warn('请先选择 Session。'); return; end
+            ids=app.SelectedChannelIds;
+            if isempty(ids) && ~isempty(app.SelectedChannelRows),rows=app.Controls.ChannelTable.Data;ids=string(rows(app.SelectedChannelRows,2));end
+            if isempty(ids), app.warn('请先在通道表中选择一个或多个通道。'); return; end
             answer=uiconfirm(app.Figure,'移除只会更新活动通道列表；原始缓存、CSV和历史结果会保留。','移除通道','Options',{'移除','取消'},'DefaultOption',2,'CancelOption',2);if answer~="移除",return;end
             [app.Project,~]=lfp_project_remove_channels(app.Project,app.CurrentSessionId,ids,Save=false);app.SelectedChannelRows=[];app.markDirty();app.loadCurrentSession();app.refreshProject();
         end
@@ -478,8 +520,16 @@ classdef LfpProjectApp < handle
             duration=NaN;fs=NaN;samples=0;if ~isempty(session.data_refs),r=session.data_refs(1);duration=r.time_end-r.time_start;fs=r.fs;samples=r.sample_count;end
             app.Controls.Metadata.Value={char("被试："+subject.subject_id);char("Session："+session.session_id);char("访视："+session.visit_label);char("状态："+session.status);sprintf('采样率：%.6g Hz | 样本：%d | 时长：%.3f s',fs,samples,duration);char("日期："+session.acquisition_date+" | 药物："+session.medication_state+" | 刺激："+session.stimulation_state)};
             rows=cell(numel(session.channels),13);for k=1:numel(session.channels),c=session.channels(k);source="";if isfield(c,'source_metadata')&&isstruct(c.source_metadata)&&isfield(c.source_metadata,'source_file_name'),source=char(string(c.source_metadata.source_file_name));end;rows(k,:)={logical(get_field_local(c,'enabled',true)),char(c.channel_id),char(c.original_label),char(c.display_label),char(c.side),char(c.region),char(c.contacts),char(c.reference),double(get_field_local(c,'sampling_rate_hz',NaN)),double(get_field_local(c,'sample_count',0)),double(get_field_local(c,'time_end',NaN)-get_field_local(c,'time_start',NaN)),char(c.unit),source};end;app.Controls.ChannelTable.Data=rows;app.Controls.DataContext.Text=char(subject.subject_id+" / "+session.session_id);
-            labels=app.channelLabels(session);if isempty(labels),labels="(无)";end;app.Controls.DataPreviewChannel.Items=cellstr(labels);app.Controls.DataPreviewChannel.Value=char(labels(1));app.Controls.AnalysisChannel.Items=cellstr(labels);app.Controls.AnalysisChannel.Value=char(labels(min(app.CurrentChannelIndex,numel(labels))));
-            app.Controls.AnalysisContext.Text=char(subject.subject_id+" / "+session.visit_label+" / "+string(numel(session.channels))+" 通道 / "+sprintf('%.3f s',duration));app.refreshDataPreview();
+            labels=app.channelLabels(session); ids=string({session.channels.channel_id})';
+            enabledMask=app.sessionEnabledMask(session); enabledIds=ids(enabledMask); enabledLabels=labels(enabledMask);
+            if isempty(enabledIds), enabledLabels="(无启用通道)"; end
+            app.Controls.DataPreviewChannel.Items=cellstr(enabledLabels);app.Controls.DataPreviewChannel.Value=char(enabledLabels(1));
+            app.refreshAnalysisChannelItems(session,labels,ids);
+            app.refreshDisplayChannelList(session,ids,labels);
+            app.Controls.AnalysisContext.Text=char(subject.subject_id+" / "+session.visit_label+" / "+string(numel(session.channels))+" 通道（启用 "+string(nnz(enabledMask))+"） / "+sprintf('%.3f s',duration));
+            app.Controls.AnalysisEnabledCount.Text=char("启用 "+string(nnz(enabledMask))+" 通道");
+            if ~app.Busy,app.Controls.RunSession.Enable=local_choice(nnz(enabledMask)>0,'on','off');end
+            app.refreshDataPreview();
         end
 
         function loadCurrentSession(app)
@@ -490,21 +540,38 @@ classdef LfpProjectApp < handle
         end
 
         function refreshDataPreview(app)
-            ax=app.Controls.DataPreviewAxes;cla(ax,'reset');if isempty(fieldnames(app.CurrentData)),text(ax,.5,.5,'当前对象没有可预览数据','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
-            idx=find(string(app.Controls.DataPreviewChannel.Items)==string(app.Controls.DataPreviewChannel.Value),1);if isempty(idx),idx=1;end
-            t=double(app.CurrentData.time(:)); y=double(app.CurrentData.signal(:,idx)); channelId="";
-            if strlength(app.CurrentSessionId)>0
-                [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
-                if ~isempty(session)&&idx<=numel(session.channels)
-                    channelId=string(session.channels(idx).channel_id);
-                    try
-                        channelData=lfp_project_get_channel_data(app.Project,app.CurrentSessionId,channelId);t=double(channelData.time(:));y=double(channelData.signal(:));
-                    catch exception
-                        app.Controls.DataPreviewInfo.Text=char("缓存错误："+string(exception.message));text(ax,.5,.5,'通道缓存不可用','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;
-                    end
+            app.clearDataPreviewAxes();
+            if strlength(app.CurrentSessionId)==0 || isempty(fieldnames(app.CurrentData))
+                app.Controls.DataPreviewInfo.Text='当前对象没有可预览数据。'; return;
+            end
+            [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
+            if isempty(session),app.Controls.DataPreviewInfo.Text='Session 不存在。';return;end
+            enabledMask=app.sessionEnabledMask(session); ids=string({session.channels.channel_id})'; labels=app.channelLabels(session);
+            ids=ids(enabledMask); labels=labels(enabledMask);
+            if isempty(ids)
+                app.Controls.DataPreviewInfo.Text='暂无启用通道。';
+                ax=uiaxes(app.Controls.DataPreviewGrid); app.Controls.DataPreviewAxes=ax; ax.Layout.Row=1; ax.Layout.Column=1; text(ax,.5,.5,'暂无启用通道','Units','normalized','HorizontalAlignment','center'); axis(ax,'off'); return;
+            end
+            n=numel(ids); grid=app.Controls.DataPreviewGrid; grid.RowHeight=repmat({125},1,n); grid.ColumnWidth={'1x'}; grid.RowSpacing=4;
+            axesList=gobjects(n,1); errors=strings(0,1); totalSamples=0; wasDownsampled=false;
+            for k=1:n
+                ax=uiaxes(grid); axesList(k)=ax; ax.Layout.Row=k; ax.Layout.Column=1;
+                try
+                    channelData=lfp_project_get_channel_data(app.Project,app.CurrentSessionId,ids(k));
+                    t=double(channelData.time(:)); y=double(channelData.signal(:)); totalSamples=totalSamples+numel(y);
+                    if isempty(t)||isempty(y), error('LFP:EmptyChannel','通道没有有效样本。'); end
+                    t=t-t(1); [tPlot,yPlot,info]=lfp_downsample_envelope(t,y,12000); wasDownsampled=wasDownsampled||info.downsampled;
+                    plot(ax,tPlot,yPlot,'Color',[.08 .18 .55],'LineWidth',.7); grid(ax,'on');
+                    xlabel(ax,'时间 (s)'); ylabel(ax,string(get_field_local(channelData,'units',app.CurrentData.units)));
+                    title(ax,string(labels(k))+" | "+sprintf('%.3f s, %d samples',t(end),numel(y)),'Interpreter','none'); xlim(ax,[t(1) t(end)]);
+                catch exception
+                    errors(end+1,1)=labels(k)+"："+string(exception.message); text(ax,.5,.5,'通道缓存不可用：'+string(exception.message),'Units','normalized','HorizontalAlignment','center','Interpreter','none'); axis(ax,'off');
                 end
             end
-            [tPlot,yPlot,info]=lfp_downsample_envelope(t,y,12000);plot(ax,tPlot,yPlot,'k');grid(ax,'on');xlabel(ax,'时间 (s)');ylabel(ax,string(app.CurrentData.units));title(ax,string(app.Controls.DataPreviewChannel.Value),'Interpreter','none');suffix="";if info.downsampled,suffix=" | 显示用 min-max 抽稀";end;app.Controls.DataPreviewInfo.Text=char(string(numel(y))+" 样本"+suffix);
+            app.Controls.DataPreviewAxes=axesList;
+            suffix="";if wasDownsampled,suffix="；显示采用 min–max 抽稀";end
+            message="已显示 "+string(n)+" 个启用通道，共 "+string(totalSamples)+" samples"+suffix+"。";if ~isempty(errors),message=message+" 缓存错误 "+string(numel(errors))+" 个。";end
+            app.Controls.DataPreviewInfo.Text=char(message);
         end
 
         function refreshAnalysisView(app)
@@ -512,8 +579,17 @@ classdef LfpProjectApp < handle
             tab=app.Controls.AnalysisResultTabs.SelectedTab;
             if tab==app.Controls.BandResultTab,name="band";elseif tab==app.Controls.SpecResultTab,name="specparam";elseif tab==app.Controls.PsdResultTab,name="psd";else,name="raw";end
             [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
-            state=lfp_render_project_session_view(name,app.viewHandles(name),app.CurrentData,app.CurrentResults,session,app.CurrentChannelIndex, ...
-                MaxDisplayPoints=12000,BandMetric=string(app.Controls.BandMetric.Value));
+            if isempty(session),app.clearAnalysisAxes('请选择有效 Session。');return;end
+            if name=="psd", state=app.renderAllChannelPsd(session);
+            elseif name=="band", state=app.renderAllChannelBands(session);
+            else
+                idx=app.currentChannelIndex(session); ids=string({session.channels.channel_id})';id=ids(idx);one=app.channelResultForId(id,idx);
+                viewData=app.channelDataForId(id,idx); viewSession=session; viewSession.channels=session.channels(idx);
+                viewResults=struct('artifactResult',get_field_local(one,'artifactResult',struct()),'psdResult',get_field_local(one,'psdResult',struct()), ...
+                    'modelResult',get_field_local(one,'modelResult',struct([])),'bandResult',get_field_local(one,'bandResult',struct()));
+                state=lfp_render_project_session_view(name,app.viewHandles(name),viewData,viewResults,viewSession,1, ...
+                    MaxDisplayPoints=12000,BandMetric=string(app.Controls.BandMetric.Value));
+            end
             app.Controls.AnalysisState.Text=char(state.message);
         end
 
@@ -526,12 +602,77 @@ classdef LfpProjectApp < handle
             end
         end
 
+        function state=renderAllChannelPsd(app,session)
+            ax=app.Controls.PsdAxes; cla(ax,'reset'); hold(ax,'on'); grid(ax,'on');
+            ids=string({session.channels.channel_id})'; labels=app.channelLabels(session); enabled=app.sessionEnabledMask(session);
+            displayIds=app.effectiveDisplayChannelIds(session);
+            colors=lines(max(1,numel(displayIds))); plotted=0; invalid=strings(0,1);
+            for k=1:numel(displayIds)
+                id=displayIds(k); idx=find(ids==id,1); if isempty(idx)||~enabled(idx),continue;end
+                one=app.channelResultForId(id,idx);
+                if isempty(one)||~isfield(one,'psdResult')||~isstruct(one.psdResult)||~isfield(one.psdResult,'psd'),invalid(end+1,1)=labels(idx)+"（无 PSD）";continue;end
+                psd=one.psdResult; f=double(get_field_local(psd,'frequencyHz',[])); p=double(get_field_local(psd,'psd',[]));
+                if isempty(f)||isempty(p),invalid(end+1,1)=labels(idx)+"（空 PSD）";continue;end
+                if size(p,1)~=numel(f)&&size(p,2)==numel(f),p=p.';end
+                if size(p,1)~=numel(f),invalid(end+1,1)=labels(idx)+"（维度不匹配）";continue;end
+                col=min(idx,size(p,2)); valid=isfinite(f)&f>0&isfinite(p(:,col))&p(:,col)>0;
+                if nnz(valid)<2,invalid(end+1,1)=labels(idx)+"（无有效正功率）";continue;end
+                plot(ax,f(valid),10*log10(p(valid,col)),'LineWidth',1.1,'Color',colors(k,:),'DisplayName',char(labels(idx)));plotted=plotted+1;
+            end
+            hold(ax,'off'); xlabel(ax,'频率 (Hz)'); ylabel(ax,'PSD (dB/Hz)'); title(ax,'PSD | 启用通道','Interpreter','none');
+            if plotted>0,legend(ax,'show','Location','best','Interpreter','none');else, text(ax,.5,.5,'暂无可用 PSD 结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');end
+            msg="已显示 "+string(plotted)+" 个通道的独立 PSD（未跨通道平均）。";if ~isempty(invalid),msg=msg+" 无效 "+string(numel(invalid))+" 个。";end
+            state=struct('status',local_choice(plotted>0,"ok","empty"),'message',msg);
+        end
+
+        function state=renderAllChannelBands(app,session)
+            app.clearBandAxes();
+            ids=string({session.channels.channel_id})'; labels=app.channelLabels(session); enabled=app.sessionEnabledMask(session); displayIds=app.effectiveDisplayChannelIds(session);
+            metric=string(app.Controls.BandMetric.Value); tables=cell(0,1);
+            for k=1:numel(displayIds)
+                id=displayIds(k);idx=find(ids==id,1);if isempty(idx)||~enabled(idx),continue;end;one=app.channelResultForId(id,idx);
+                if isempty(one)||~isfield(one,'bandResult')||~isstruct(one.bandResult)||~isfield(one.bandResult,'table'),continue;end
+                tbl=one.bandResult.table;if ~ismember(metric,string(tbl.Properties.VariableNames)),continue;end
+                tbl.channelIndex(:)=idx;tbl.channelLabel(:)=labels(idx);tables{end+1,1}=tbl; %#ok<AGROW>
+            end
+            if isempty(tables), app.setBandEmptyState('暂无可用频带功率结果。'); app.Controls.BandResultTable.Data=cell(0,1); state=struct('status',"empty",'message',"暂无可用频带功率结果。");return;end
+            allTbl=tables{1};for k=2:numel(tables),allTbl=[allTbl;tables{k}];end %#ok<AGROW>
+            bandNames=unique(string(allTbl.band),'stable');n=numel(bandNames);layoutGrid=app.Controls.BandPlotGrid;layoutGrid.RowHeight=repmat({180},1,n);layoutGrid.ColumnWidth={'1x'};axesList=gobjects(n,1);colors=lines(max(1,height(allTbl)));
+            for b=1:n
+                ax=uiaxes(layoutGrid);axesList(b)=ax;ax.Layout.Row=b;ax.Layout.Column=1;rows=string(allTbl.band)==bandNames(b);vals=double(allTbl.(char(metric))(rows));ch=string(allTbl.channelLabel(rows));ok=isfinite(vals)&logical(allTbl.computable(rows));
+                if any(ok),bar(ax,1:nnz(ok),vals(ok),'FaceColor','flat','CData',colors(1:nnz(ok),:));set(ax,'XTick',1:nnz(ok),'XTickLabel',cellstr(ch(ok)));xtickangle(ax,30);grid(ax,'on');else,text(ax,.5,.5,'该频段没有可计算值','Units','normalized','HorizontalAlignment','center');axis(ax,'off');end
+                title(ax,bandNames(b)+" ["+string(allTbl.lowHz(find(rows,1)))+"–"+string(allTbl.highHz(find(rows,1)))+" Hz]",'Interpreter','none');ylabel(ax,metric,'Interpreter','none');xlabel(ax,'通道');
+            end
+            app.Controls.BandAxes=axesList;app.Controls.BandResultTable.Data=lfp_table_to_uitable_data(allTbl);app.Controls.BandResultTable.ColumnName=allTbl.Properties.VariableNames;
+            state=struct('status',"ok",'message',string(numel(bandNames))+" 个频段；每个点/柱代表一个启用通道汇总值。");
+        end
+
+        function one=channelResultForId(app,id,index)
+            one=[];r=app.CurrentResults;if isfield(r,'channelResults')&&~isempty(r.channelResults)
+                idx=find(string({r.channelResults.channel_id})==id,1);if ~isempty(idx),one=r.channelResults(idx);return;end
+            end
+            if isfield(r,'psdResult')&&isstruct(r.psdResult)
+                one=struct('psdResult',r.psdResult,'modelResult',r.modelResult,'bandResult',r.bandResult,'artifactResult',r.artifactResult);
+                if isfield(one,'modelResult')&&numel(one.modelResult)>=index,one.modelResult=one.modelResult(index);end
+            end
+        end
+        function data=channelDataForId(app,id,index)
+            data=struct('time',[],'signal',[],'fs',NaN,'channelLabels',"",'units',"uV",'metadata',struct());
+            try,data=lfp_project_get_channel_data(app.Project,app.CurrentSessionId,id);return;catch,end
+            if isfield(app.CurrentData,'time')&&isfield(app.CurrentData,'signal')&&index<=size(app.CurrentData.signal,2)
+                data=app.CurrentData;data.signal=app.CurrentData.signal(:,index);if isfield(data,'channelLabels'),data.channelLabels=data.channelLabels(index);end
+            end
+        end
+
         function cfg=readAnalysisConfig(app)
             cfg=app.Project.defaultConfig;cfg.artifact.amplitudeZ=app.Controls.ArtifactZ.Value;cfg.artifact.derivativeZ=app.Controls.JumpZ.Value;cfg.artifact.paddingSeconds=app.Controls.Padding.Value;
             cfg.psd.method=string(app.Controls.PsdMethod.Value);cfg.psd.windowLengthSec=app.Controls.PsdWindow.Value;cfg.psd.frequencyRange=[app.Controls.PsdLow.Value app.Controls.PsdHigh.Value];cfg.psd.overlapFraction=app.Controls.PsdOverlap.Value;cfg.psd.multitaper.timeBandwidthProduct=app.Controls.PsdNW.Value;
             cfg.psd.multitaper.taperCount=round(app.Controls.PsdK.Value);cfg.fooof.aperiodicMode=string(app.Controls.SpecMode.Value);cfg.fooof.frequencyRange=[app.Controls.SpecLow.Value app.Controls.SpecHigh.Value];cfg.fooof.maxNumberPeaks=round(app.Controls.SpecPeaks.Value);
             cfg.bands=app.readBandsFromTable();
-            if ~isempty(fieldnames(app.CurrentData))&&cfg.psd.frequencyRange(2)>app.CurrentData.fs/2,error('LFP:FrequencyAboveNyquist','PSD 上限 %.3g Hz 超过 Nyquist %.3g Hz。',cfg.psd.frequencyRange(2),app.CurrentData.fs/2);end
+            if ~isempty(fieldnames(app.CurrentData))
+                [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);mask=app.sessionEnabledMask(session);fsValues=double([session.channels(mask).sampling_rate_hz]);fsValues=fsValues(isfinite(fsValues)&fsValues>0);if isempty(fsValues),fsValues=double(app.CurrentData.fs);end
+                nyquist=min(fsValues)/2;if cfg.psd.frequencyRange(2)>nyquist,error('LFP:FrequencyAboveNyquist','PSD 上限 %.3g Hz 超过启用通道的最低 Nyquist %.3g Hz。',cfg.psd.frequencyRange(2),nyquist);end
+            end
         end
 
         function bands=readBandsFromTable(app)
@@ -542,7 +683,10 @@ classdef LfpProjectApp < handle
                 if ~enabled,continue;end
                 if strlength(name)==0||any(names==name),error('LFP:InvalidBands','频段名称不能为空且不能重复。');end
                 if ~isfinite(low)||~isfinite(high)||low<0||high<=low,error('LFP:InvalidBands','频段 %s 的边界必须满足 0≤下限<上限。',name);end
-                if ~isempty(fieldnames(app.CurrentData))&&high>double(app.CurrentData.fs)/2,error('LFP:FrequencyAboveNyquist','频段 %s 上限 %.3g Hz 超过 Nyquist。',name,high);end
+                if ~isempty(fieldnames(app.CurrentData))
+                    [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);mask=app.sessionEnabledMask(session);fsValues=double([session.channels(mask).sampling_rate_hz]);fsValues=fsValues(isfinite(fsValues)&fsValues>0);if isempty(fsValues),fsValues=double(app.CurrentData.fs);end
+                    if high>min(fsValues)/2,error('LFP:FrequencyAboveNyquist','频段 %s 上限 %.3g Hz 超过启用通道的最低 Nyquist。',name);end
+                end
                 names(end+1,1)=name;bands(end+1)=struct('name',name,'rangeHz',[low high]); %#ok<AGROW>
             end
             if isempty(bands),error('LFP:InvalidBands','至少启用一个频段。');end
@@ -572,9 +716,30 @@ classdef LfpProjectApp < handle
         function progressUpdate(app,p,message),if app.CancelRequested,error('LFP:UserCancelled','用户已取消分析。');end;app.setStatus('运行中',string(message),p);drawnow limitrate;end
         function finishTask(app),app.Busy=false;app.updateBusyState();end
         function updateBusyState(app)
-            enabled=local_choice(app.Busy,'off','on');app.Controls.RunSession.Enable=enabled;app.Controls.CompareButton.Enable=enabled;app.Controls.UnifyCompare.Enable=enabled;app.Controls.NewProject.Enable=enabled;app.Controls.OpenProject.Enable=enabled;app.Controls.Cancel.Enable=local_choice(app.Busy,'on','off');
+            enabled=local_choice(app.Busy,'off','on');
+            runEnabled=enabled;
+            if ~app.Busy && strlength(app.CurrentSessionId)>0
+                [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);
+                if isempty(session) || ~any(app.sessionEnabledMask(session)), runEnabled='off'; end
+            elseif ~app.Busy
+                runEnabled='off';
+            end
+            app.Controls.RunSession.Enable=runEnabled;app.Controls.CompareButton.Enable=enabled;app.Controls.UnifyCompare.Enable=enabled;app.Controls.NewProject.Enable=enabled;app.Controls.OpenProject.Enable=enabled;app.Controls.Cancel.Enable=local_choice(app.Busy,'on','off');
+            for name=["ChannelTable" "EnableChannels" "DisableChannels" "RemoveChannels" "ImportData" "EditMetadata" "BandTable" "AnalysisChannel"]
+                if isfield(app.Controls,char(name))&&isgraphics(app.Controls.(char(name))),app.Controls.(char(name)).Enable=enabled;end
+            end
         end
-        function onAnalysisChannelChanged(app),app.CurrentChannelIndex=find(string(app.Controls.AnalysisChannel.Items)==string(app.Controls.AnalysisChannel.Value),1);if isempty(app.CurrentChannelIndex),app.CurrentChannelIndex=1;end;app.refreshAnalysisView();end
+        function onAnalysisChannelChanged(app)
+            if strlength(app.CurrentSessionId)>0
+                [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId); labels=app.channelLabels(session); ids=string({session.channels.channel_id})'; enabled=app.sessionEnabledMask(session); enabledIds=ids(enabled); enabledLabels=labels(enabled);
+                value=string(app.Controls.AnalysisChannel.Value); idx=find(enabledLabels==value,1);
+                if isempty(idx),idx=1;end
+                if ~isempty(enabledIds), app.CurrentViewedChannelId=enabledIds(idx); app.CurrentChannelIndex=find(ids==app.CurrentViewedChannelId,1); else, app.CurrentChannelIndex=1; app.CurrentViewedChannelId=""; end
+            else
+                app.CurrentChannelIndex=1; app.CurrentViewedChannelId="";
+            end
+            app.refreshAnalysisView();
+        end
 
         function refreshComparisonFilters(app)
             if app.noProject(),return;end
@@ -741,7 +906,9 @@ classdef LfpProjectApp < handle
         function saveComparisonImage(app),if isempty(fieldnames(app.CurrentComparison)),app.warn('尚无比较图。');return;end;[f,p]=uiputfile({'*.png','PNG 图片'},'保存比较图片','comparison.png');if isequal(f,0),return;end;try,exportgraphics(app.Controls.CompareAxes,fullfile(p,f),'Resolution',300);catch e,app.showError(e,'保存图片失败');end,end
         function exportComparisonData(app),if isempty(fieldnames(app.CurrentComparison)),app.warn('尚无比较结果。');return;end;folder=uigetdir('','选择导出目录');if isequal(folder,0),return;end;try,lfp_export_comparison(app.CurrentComparison,string(folder));app.setStatus('就绪','比较数据已导出。',0);catch e,app.showError(e,'导出失败');end,end
         function saveCurrentFigure(app)
-            if isempty(fieldnames(app.CurrentData)),app.warn('当前没有可保存图形。');return;end;[f,p]=uiputfile({'*.png','PNG 图片'},'保存当前图形',char(app.CurrentSessionId+".png"));if isequal(f,0),return;end;tab=app.Controls.AnalysisResultTabs.SelectedTab;ax=app.Controls.RawAxes;if tab==app.Controls.PsdResultTab,ax=app.Controls.PsdAxes;elseif tab==app.Controls.SpecResultTab,ax=app.Controls.SpecModelAxes;elseif tab==app.Controls.BandResultTab,ax=app.Controls.BandAxes;end;try,exportgraphics(ax,fullfile(p,f),'Resolution',300);catch e,app.showError(e,'保存图片失败');end
+            if isempty(fieldnames(app.CurrentData)),app.warn('当前没有可保存图形。');return;end;[f,p]=uiputfile({'*.png','PNG 图片'},'保存当前图形',char(app.CurrentSessionId+".png"));if isequal(f,0),return;end;tab=app.Controls.AnalysisResultTabs.SelectedTab;ax=app.Controls.RawAxes;if tab==app.Controls.PsdResultTab,ax=app.Controls.PsdAxes;elseif tab==app.Controls.SpecResultTab,ax=app.Controls.SpecModelAxes;elseif tab==app.Controls.BandResultTab,ax=app.Controls.BandAxes;end
+            if isempty(ax)||~isgraphics(ax(1)),app.warn('当前结果页没有可导出的图形。');return;end
+            try,exportgraphics(ax(1),fullfile(p,f),'Resolution',300);catch e,app.showError(e,'保存图片失败');end
         end
         function saveCurrentData(app)
             if isempty(fieldnames(app.CurrentResults)),app.warn('当前 Session 尚无分析结果。');return;end;[f,p]=uiputfile({'*.mat','MAT 文件'},'保存当前结果',char(app.CurrentSessionId+"_results.mat"));if isequal(f,0),return;end;sessionId=app.CurrentSessionId;run=app.CurrentRun;results=app.CurrentResults;data=app.CurrentData;projectId=app.Project.project_id;save(fullfile(p,f),'projectId','sessionId','run','results','data','-v7.3');
@@ -781,9 +948,30 @@ classdef LfpProjectApp < handle
             end
         end
         function showWelcome(app),app.Controls.Welcome.Visible='on';app.Controls.WorkspaceTabs.Visible='off';app.Controls.SaveProject.Enable='off';end
-        function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.CompareSelectedChannelKeys=strings(0,1);app.SelectedChannelRows=[];app.applyConfigToControls();end
+        function resetSelection(app),app.CurrentSubjectId="";app.CurrentSessionId="";app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.CurrentComparison=struct();app.CompareSelectedSessionIds=strings(0,1);app.CompareSelectedChannelKeys=strings(0,1);app.SelectedChannelRows=[];app.SelectedChannelIds=strings(0,1);app.DisplayChannelIds=strings(0,1);app.CurrentViewedChannelId="";app.AnalysisSnapshot=struct();app.applyConfigToControls();end
         function clearSessionDisplay(app),app.CurrentData=struct();app.CurrentRun=struct();app.CurrentResults=struct();app.Controls.ChannelTable.Data=cell(0,13);app.Controls.Metadata.Value={'请选择项目节点。'};app.clearAnalysisAxes('请选择 Session。');app.refreshDataPreview();end
-        function clearAnalysisAxes(app,message),axesList=[app.Controls.RawAxes app.Controls.CleanAxes app.Controls.PsdAxes app.Controls.SpecModelAxes app.Controls.SpecPeakAxes app.Controls.BandAxes];for ax=axesList,cla(ax,'reset');text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');end;app.Controls.SpecQuality.Data=cell(0,2);app.Controls.BandResultTable.Data=cell(0,1);end
+        function clearAnalysisAxes(app,message)
+            axesList=[app.Controls.RawAxes app.Controls.CleanAxes app.Controls.PsdAxes app.Controls.SpecModelAxes app.Controls.SpecPeakAxes];
+            for ax=axesList,if isgraphics(ax),cla(ax,'reset');text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');end,end
+            app.clearBandAxes(message);app.Controls.SpecQuality.Data=cell(0,2);app.Controls.BandResultTable.Data=cell(0,1);
+        end
+        function clearDataPreviewAxes(app)
+            if ~isfield(app.Controls,'DataPreviewGrid')||~isgraphics(app.Controls.DataPreviewGrid),return;end
+            children=app.Controls.DataPreviewGrid.Children;for k=1:numel(children),if isgraphics(children(k)),delete(children(k));end,end
+            app.Controls.DataPreviewAxes=gobjects(0);
+        end
+        function clearBandAxes(app,message)
+            if nargin<2,message='暂无频带功率结果。';end
+            if isfield(app.Controls,'BandPlotGrid')&&isgraphics(app.Controls.BandPlotGrid)
+                children=app.Controls.BandPlotGrid.Children;for k=1:numel(children),if isgraphics(children(k)),delete(children(k));end,end
+                app.Controls.BandPlotGrid.RowHeight={1};
+            end
+            app.Controls.BandAxes=gobjects(0);
+            if isfield(app.Controls,'BandPlotPanel')&&isgraphics(app.Controls.BandPlotPanel)
+                ax=uiaxes(app.Controls.BandPlotGrid);ax.Layout.Row=1;ax.Layout.Column=1;text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');app.Controls.BandAxes=ax;
+            end
+        end
+        function setBandEmptyState(app,message),app.clearBandAxes(message);end
         function updateProjectHeader(app),if app.noProject(),return;end;app.Controls.ProjectTitle.Text=char(app.Project.name);app.Controls.ProjectTitle.Tooltip=char(app.Project.rootPath);app.Controls.SaveState.Text=local_choice(app.Dirty,'未保存','已保存');app.Controls.SaveProject.Enable='on';app.Controls.NavigationHint.Text='单击节点查看；比较对象在结果比较页单独勾选。';end
         function markDirty(app),app.Dirty=true;app.updateProjectHeader();end
         function setStatus(app,task,message,progress),task=clean_text(task);message=clean_text(message);app.Controls.TaskStatus.Text=char(task);app.Controls.StageStatus.Text=char(message);app.Controls.StageStatus.Tooltip=char(message);progress=max(0,min(1,double(progress)));app.Controls.Progress.Value=progress;app.Controls.Percent.Text=sprintf('%d%%',round(progress*100));app.LogMessages(end+1,1)="["+string(datestr(now,'HH:MM:SS'))+"] "+task+" | "+message;end
@@ -791,57 +979,38 @@ classdef LfpProjectApp < handle
         function warn(app,message),app.setStatus('提示',string(message),0);if isgraphics(app.Figure)&&strcmp(app.Figure.Visible,'on'),uialert(app.Figure,string(message),'提示','Icon','warning');end,end
         function showLog(app),fig=uifigure('Name','SceneRay LFP 日志','Position',[250 180 850 520]);g=uigridlayout(fig,[1 1]);uitextarea(g,'Editable','off','Value',cellstr(app.LogMessages),'WordWrap','on');end
         function tf=noProject(app),tf=isempty(fieldnames(app.Project));end
-        function labels=channelLabels(~,session),labels=strings(numel(session.channels),1);for i=1:numel(session.channels),labels(i)=session.channels(i).display_label;if strlength(labels(i))==0,labels(i)=session.channels(i).original_label;end;end,end
+        function labels=channelLabels(~,session),labels=strings(numel(session.channels),1);for i=1:numel(session.channels),labels(i)=string(session.channels(i).display_label);if strlength(labels(i))==0,labels(i)=string(session.channels(i).original_label);end;end,end
+        function mask=sessionEnabledMask(~,session)
+            mask=true(1,numel(session.channels));if ~isempty(session.channels)&&isfield(session.channels,'enabled'),mask=logical([session.channels.enabled]);end
+        end
+        function idx=currentChannelIndex(app,session)
+            ids=string({session.channels.channel_id})';idx=find(ids==app.CurrentViewedChannelId,1);if isempty(idx)||idx<1,idx=min(max(app.CurrentChannelIndex,1),max(1,numel(ids)));end
+            if idx<=numel(ids),app.CurrentChannelIndex=idx;app.CurrentViewedChannelId=ids(idx);end
+        end
+        function refreshAnalysisChannelItems(app,session,labels,ids)
+            mask=app.sessionEnabledMask(session);ids=ids(mask);labels=labels(mask);
+            if isempty(ids),items="(无)";else,items=labels;end
+            current=app.CurrentViewedChannelId; if strlength(current)==0&&~isempty(ids),current=ids(min(app.CurrentChannelIndex,numel(ids)));end
+            app.Controls.AnalysisChannel.Items=cellstr(items);
+            if isempty(items)||items(1)=="(无)",app.Controls.AnalysisChannel.Value=char(items(1));app.CurrentViewedChannelId="";return;end
+            idx=find(ids==current,1);if isempty(idx),idx=1;end;app.Controls.AnalysisChannel.Value=char(items(idx));app.CurrentChannelIndex=idx;app.CurrentViewedChannelId=ids(idx);
+        end
+        function refreshDisplayChannelList(app,session,ids,labels)
+            enabled=app.sessionEnabledMask(session);validIds=ids(enabled);validLabels=labels(enabled);if isempty(validIds),validIds="(无)";end
+            if isempty(validIds)||validIds(1)=="(无)",app.Controls.DisplayChannelList.Items={'(无)'};app.Controls.DisplayChannelList.Value={'(无)'};app.DisplayChannelIds=strings(0,1);return;end
+            app.Controls.DisplayChannelList.Items=cellstr(validLabels);keep=intersect(app.DisplayChannelIds,validIds,'stable');if isempty(keep),keep=validIds;end;app.DisplayChannelIds=keep;idx=find(ismember(validIds,keep));app.Controls.DisplayChannelList.Value=cellstr(validLabels(idx));
+        end
+        function ids=effectiveDisplayChannelIds(app,session)
+            allIds=string({session.channels.channel_id})';enabled=app.sessionEnabledMask(session);allIds=allIds(enabled);if app.DisplaySelectionExplicit,ids=intersect(app.DisplayChannelIds,allIds,'stable');else,ids=allIds;end
+        end
+        function onDisplayChannelsChanged(app)
+            if strlength(app.CurrentSessionId)==0,return;end;[session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);if isempty(session),return;end
+            vals=string(app.Controls.DisplayChannelList.Value);ids=string({session.channels.channel_id})';labels=app.channelLabels(session);mask=app.sessionEnabledMask(session);enabledIds=ids(mask);enabledLabels=labels(mask);idx=find(ismember(enabledLabels,vals));app.DisplayChannelIds=enabledIds(idx);app.DisplaySelectionExplicit=true;app.refreshAnalysisView();
+        end
+        function selectAllDisplayChannels(app)
+            if strlength(app.CurrentSessionId)==0,return;end;[session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId);if isempty(session),return;end;ids=string({session.channels.channel_id})';mask=app.sessionEnabledMask(session);app.DisplayChannelIds=ids(mask);app.DisplaySelectionExplicit=false;labels=app.channelLabels(session);app.Controls.DisplayChannelList.Value=cellstr(labels(mask));app.refreshAnalysisView();
+        end
+        function clearDisplayChannels(app),app.DisplayChannelIds=strings(0,1);app.DisplaySelectionExplicit=true;if isfield(app.Controls,'DisplayChannelList'),app.Controls.DisplayChannelList.Value={};end;app.refreshAnalysisView();end
         function setDropdownItems(~,control,items),current=string(control.Value);control.Items=cellstr(items);if any(items==current),control.Value=char(current);else,control.Value=char(items(1));end,end
     end
-end
-
-function value=local_choice(condition,a,b)
-if condition,value=a;else,value=b;end
-end
-
-function value=clean_text(value)
-value=string(value);value=value(~ismissing(value));if isempty(value),value="";else,value=join(value,"；");end
-end
-
-function rows = band_table_data(bands)
-if isstruct(bands) && numel(bands)>0 && isfield(bands,'name') && isfield(bands,'rangeHz')
-    names=string({bands.name})';ranges={bands.rangeHz};
-else
-    names=string(fieldnames(bands));ranges=cell(numel(names),1);
-    for i=1:numel(names),ranges{i}=bands.(char(names(i)));end
-end
-rows=cell(numel(names),4);
-for i=1:numel(names),range=double(ranges{i});rows(i,:)={true,char(names(i)),double(range(1)),double(range(2))};end
-end
-
-function names = project_band_names(project)
-names=strings(0,1);
-if ~isstruct(project)||~isfield(project,'defaultConfig')||~isstruct(project.defaultConfig)||~isfield(project.defaultConfig,'bands'),return;end
-bands=project.defaultConfig.bands;
-if isstruct(bands)&&numel(bands)>0&&isfield(bands,'name')
-    names=string({bands.name})';
-elseif isstruct(bands)
-    names=string(fieldnames(bands));
-end
-names=unique(names(strlength(names)>0),'stable');
-end
-
-function name = get_filename_local(path)
-[~,name,ext] = fileparts(char(path)); name = string([name ext]);
-end
-
-function suffix = local_append_suffix(appended)
-if appended, suffix = '（追加到当前 Session）'; else, suffix = ''; end
-end
-
-function value = get_field_local(source, name, fallback)
-if isstruct(source) && isfield(source, name) && ~isempty(source.(name)), value = source.(name); else, value = fallback; end
-end
-
-function value = get_cell_local(rows, row, column, fallback)
-value = fallback;
-if column <= size(rows, 2) && ~isempty(rows{row, column})
-    value = rows{row, column};
-end
 end

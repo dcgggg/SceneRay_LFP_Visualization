@@ -2,7 +2,7 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
-当前本地开发版本：**v0.10.0-dev**。主入口已重构为 Project→Subject→Session→Channel 项目工作区，支持从空白界面完成建项目、导入、单次分析、跨 Session 比较、导出与恢复。原有分析算法、AnalysisRun 缓存和批处理接口保持独立可调用。
+当前本地开发版本：**v0.10.0-dev**。主入口已重构为 Project→Subject→Session→Channel 项目工作区，支持从空白界面完成建项目、导入、分析参数与结果查看、跨 Session 比较、导出与恢复。原有分析算法、AnalysisRun 缓存和批处理接口保持独立可调用。
 
 ## 目标
 
@@ -41,7 +41,7 @@ EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会�
 
 通过顶部“新建项目”创建的项目会自动建立可移动的目录：`subjects/<显示名>__<稳定ID>/<Session显示名>__<稳定ID>/` 下保存 `subject.mat`、`session.mat`、`data/`、`configs/`、`results/` 和 `exports/`，项目级比较方案、导出文件和日志分别位于 `comparisons/`、`exports/` 和 `logs/`。导入的源 CSV 会复制到对应 Session 的 `data/`（同名文件自动加后缀），原文件和原始路径仍保留。Subject/Session 重命名只更新显示名和相对引用，稳定 ID 不变；旧的根目录 `data/`/`results/` 项目仍按兼容模式读取。
 
-结果比较页提供按 Subject、访视和状态筛选的稳定 ID 选择表，支持自定义比较组、按 Subject 等权的分组 PSD 曲线，以及分组频带功率条形图和被试代表点。重复 Session 先在被试内汇总，不能因为 Session 或通道更多而获得更大组权重；缺失频段不会补零。单次分析页的频段表可启用、编辑、恢复默认并保存为项目模板，当前频段结构会随 AnalysisRun 保存。
+结果比较页提供按 Subject、访视和状态筛选的稳定 ID 选择表，支持自定义比较组、按 Subject 等权的分组 PSD 曲线，以及分组频带功率条形图和被试代表点。重复 Session 先在被试内汇总，不能因为 Session 或通道更多而获得更大组权重；缺失频段不会补零。分析参数与结果页的频段表可启用、编辑、恢复默认并保存为项目模板，当前频段结构会随 AnalysisRun 保存。
 
 项目不调用 Python 封装；FieldTrip/原生 MATLAB 路径保持纯 MATLAB 运行。
 
@@ -58,13 +58,13 @@ app = launch_gui;
 1. 新建项目或打开包含 `project.mat` 的项目目录；
 2. 添加被试，再为被试添加无数据的 Session；
 3. 选中 Session 后导入一个或多个 CSV；后续再次导入会追加新通道，预览窗口确认采样率、时间列和信号列；
-4. 在“单次分析”页运行伪影、PSD、specparam 和频带功率；
+4. 在“分析参数与结果”页勾选需要的模块，点击“分析全部启用通道”；运行会按稳定 `channel_id` 独立处理全部启用通道，当前查看通道不会限制批量分析；
 5. 在“结果比较”页独立勾选 Session，确认每条记录的通道映射后比较或导出；
 6. 保存并关闭；下次打开时恢复项目、AnalysisRun 和最近保存的比较方案。
 
 ![空白启动页](docs/images/gui/01-welcome.png)
 
-![单次分析页](docs/images/gui/04-session-analysis.png)
+![分析参数与结果页](docs/images/gui/04-session-analysis.png)
 
 ![被试内比较页](docs/images/gui/05-within-subject-comparison.png)
 
@@ -134,7 +134,7 @@ projectApp = launchLfpProjectApp;
 legacySingleFileApp = launchLfpApp;
 ```
 
-`launchLfpProjectApp` 指向同一个项目主界面；`launchLfpApp` 仅保留旧的单文件兼容工作流。项目主界面固定包含顶部项目工具栏、左侧稳定 ID 导航树、数据管理/单次分析/结果比较三个工作页和底部状态栏。比较候选可按被试、访视及分析状态筛选，多选独立于左侧当前查看节点，筛选不会清除已有选择。窗口变窄时主界面自动收起导航，并通过顶部“打开导航/返回工作区”切换，避免关键结果与导出按钮被裁切。
+`launchLfpProjectApp` 指向同一个项目主界面；`launchLfpApp` 仅保留旧的单文件兼容工作流。项目主界面固定包含顶部项目工具栏、左侧稳定 ID 导航树、数据管理/分析参数与结果/结果比较三个工作页和底部状态栏。数据管理页的预览会同时显示全部启用通道，每个通道使用自己的时间轴；分析结果页的 PSD 和频带功率按通道独立读取并展示，specparam 通过通道选择器查看单个通道。比较候选可按被试、访视及分析状态筛选，多选独立于左侧当前查看节点，筛选不会清除已有选择。窗口变窄时主界面自动收起导航，并通过顶部“打开导航/返回工作区”切换，避免关键结果与导出按钮被裁切。
 
 主 GUI 的结果页包含全记录原始/伪影显示、PSD、specparam 模型与峰分解、频带功率。计算结果按 `AnalysisRun` 版本保存；切换 Session 或通道只读取相应缓存并重绘，没有结果时显示空状态。比较页保存对象清单、通道映射、指标、频段和实际结果版本；缺失值保持为 NaN，不补零，不自动执行显著性检验。
 
