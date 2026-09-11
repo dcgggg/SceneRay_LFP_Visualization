@@ -26,9 +26,10 @@ nChannels = size(totalPsd, 2);
 if size(totalPsd, 1) ~= numel(frequencyHz)
     error('LFP:InvalidSpectrum', 'PSD rows must match frequencyHz.');
 end
-referenceMask = frequencyHz >= options.ReferenceRangeHz(1) & ...
-    frequencyHz <= options.ReferenceRangeHz(2) & frequencyHz > 0;
-referencePower = integrate_columns(frequencyHz(referenceMask), totalPsd(referenceMask, :));
+referenceInterval=double(options.ReferenceRangeHz);
+referenceInterval(1)=max(referenceInterval(1),frequencyHz(1));
+if ~isfinite(referenceInterval(2)),referenceInterval(2)=frequencyHz(end);else,referenceInterval(2)=min(referenceInterval(2),frequencyHz(end));end
+[referencePower,~] = integrate_interval(frequencyHz, totalPsd, referenceInterval);
 
 hasParameterization = isfield(data, 'spectralParameters') && ...
     isfield(data.spectralParameters, 'aperiodicPsd') && ...
@@ -60,8 +61,6 @@ computable = false(rows, 1);
 status = strings(rows, 1);
 row = 0;
 for bandIndex = 1:nBands
-    bandMask = frequencyHz >= bands(bandIndex).rangeHz(1) & ...
-        frequencyHz <= bands(bandIndex).rangeHz(2) & frequencyHz > 0;
     bandInRange = bands(bandIndex).rangeHz(1) >= frequencyHz(1) && ...
         bands(bandIndex).rangeHz(2) <= frequencyHz(end);
     for channel = 1:nChannels
@@ -73,12 +72,12 @@ for bandIndex = 1:nBands
         highHz(row) = bands(bandIndex).rangeHz(2);
         if ~bandInRange
             status(row) = "outside_psd_range";
-        elseif nnz(bandMask) < 2
-            status(row) = "insufficient_frequency_points";
-        elseif nnz(isfinite(totalPsd(bandMask, channel)) & totalPsd(bandMask, channel) >= 0) < 2
-            status(row) = "invalid_psd";
         else
-            totalPower(row) = integrate_columns(frequencyHz(bandMask), totalPsd(bandMask, channel));
+            [totalPower(row),integralOk] = integrate_interval(frequencyHz, totalPsd(:,channel), bands(bandIndex).rangeHz);
+            if ~integralOk || ~isfinite(totalPower(row)) || totalPower(row) < 0
+                status(row) = "invalid_psd";
+                continue;
+            end
             if isfinite(totalPower(row)) && totalPower(row) > 0
                 logTotalPower(row) = log10(totalPower(row));
                 computable(row) = true;
@@ -92,8 +91,10 @@ for bandIndex = 1:nBands
                 status(row) = "reference_unavailable";
             end
             if hasParameterization
-                aperiodicPower(row) = integrate_columns(frequencyHz(bandMask), aperiodicPsd(bandMask, channel));
-                periodicPower(row) = integrate_columns(frequencyHz(bandMask), periodicPsd(bandMask, channel));
+                [aperiodicPower(row),aperiodicOk] = integrate_interval(frequencyHz, aperiodicPsd(:,channel), bands(bandIndex).rangeHz);
+                [periodicPower(row),periodicOk] = integrate_interval(frequencyHz, periodicPsd(:,channel), bands(bandIndex).rangeHz);
+                if ~aperiodicOk, aperiodicPower(row)=NaN; end
+                if ~periodicOk, periodicPower(row)=NaN; end
             end
         end
     end
@@ -133,12 +134,27 @@ for index = 1:numel(bands)
 end
 end
 
-function value = integrate_columns(frequencyHz, values)
-if isempty(frequencyHz) || size(values, 1) < 2
-    value = NaN(size(values, 2), 1);
-    return;
+function [value,ok] = integrate_interval(frequencyHz, values, interval)
+% Integrate linear PSD values and interpolate only valid interval edges.
+% Interior NaN/Inf values are rejected; no extrapolation or gap filling is
+% performed. This keeps adjacent, non-grid-aligned band edges consistent.
+frequencyHz=double(frequencyHz(:));values=double(values);if isvector(values),values=values(:);end
+nChannels=size(values,2);value=NaN(nChannels,1);ok=false(nChannels,1);
+if numel(interval)~=2 || numel(frequencyHz)<2 || size(values,1)~=numel(frequencyHz),return;end
+if any(~isfinite(frequencyHz)) || any(diff(frequencyHz)<=0),return;end
+low=double(interval(1));high=double(interval(2));
+if ~isfinite(low),low=frequencyHz(1);end;if ~isfinite(high),high=frequencyHz(end);end
+if low<frequencyHz(1) || high>frequencyHz(end) || high<=low,return;end
+mask=frequencyHz>=low & frequencyHz<=high;
+if nnz(mask)<1,return;end
+x=unique([low;frequencyHz(mask);high]);
+for c=1:nChannels
+    interior=values(mask,c);
+    if any(~isfinite(interior)) || any(interior<0),continue;end
+    yq=interp1(frequencyHz,values(:,c),x,'linear');
+    if any(~isfinite(yq)) || any(yq<0),continue;end
+    value(c)=trapz(x,yq);ok(c)=isfinite(value(c));
 end
-value = trapz(frequencyHz, values, 1)';
 end
 
 function label = get_channel_label(data, channel)

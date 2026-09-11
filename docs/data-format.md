@@ -34,6 +34,18 @@ data.cleanedSignal      % optional NaN-marked analysis/display copy
 `lfp_project_get_session_data` 在需要时返回带 NaN 标记的显示矩阵，并在 metadata 中标记
 `heterogeneousChannels`，该矩阵不能替代独立通道分析输入。
 
+预览和分析共用 `lfp_project_get_channel_data(project, sessionId, channelId)`；解析路径始终
+以 `project.rootPath` 为根，不依赖 MATLAB 当前目录。读取错误会区分缓存引用缺失、文件缺失、
+变量/版本不兼容、通道维度不匹配和文件读取失败，并在异常消息中包含 Session、Channel 和解析路径。
+对于旧项目或重命名后索引不一致的通道，可在用户明确操作后调用
+`lfp_project_repair_channel_caches(project, sessionId, channelIds)`。该函数先验证已有缓存，
+再尝试项目内归档的 Session MAT 或归档 CSV（使用保存的导入配置）重建；不会修改原 CSV、猜测映射或填充假信号。
+
+频段定义保存在 `cfg.bandDefinitions` 中，每行包含 `name`、`rangeHz` 和 `enabled`；启用行会在运行
+时生成兼容的 `cfg.bands` 快照。GUI 新建配置预设 Delta [1,4]、Theta [4,8]、Alpha [8,13]、
+Beta [13,35]，Low Beta [13,20] 和 High Beta [20,35] 默认停用。它们只是可编辑预设，重叠频段不会
+自动相加。项目默认频段、Session 当前配置和 AnalysisRun 中的结果快照彼此独立。
+
 For generic CSV files, `lfp_inspect_csv` reads only a bounded prefix for preview and automatic suggestions; it does not materialize the entire file as a heterogeneous cell array. `lfp_import_csv_configured` accepts the confirmed settings and uses a numeric `readmatrix` path for rectangular files, with an explicitly recorded `readcell_fallback` only when the numeric reader cannot handle the source. With `DataDirection="samples_by_channels"`, rows are samples and selected columns are channels. With `DataDirection="channels_by_samples"`, selected columns are samples and each source row is a channel; the output is normalized back to samples × channels. A time column is not supported for the latter orientation because its meaning is ambiguous; provide an explicit sampling rate. Missing signal cells remain NaN and are counted in `metadata.missingValueCount`.
 
 `metadata.timeValidation` records monotonicity, duplicates, regularity, median time step and coefficient of variation. The GUI blocks PSD/model workflows when this validation is invalid or irregular rather than silently resampling. If no time column is supplied, a user-confirmed `SamplingRateHz` is required and `data.time` is generated from sample indices.

@@ -34,12 +34,24 @@ try
                 project.subjects(index).sessions(sessionIndex).folder_relative_path = replace_prefix(oldSessionFolder, oldFolder, newFolder);
                 for refIndex = 1:numel(project.subjects(index).sessions(sessionIndex).data_refs)
                     ref = project.subjects(index).sessions(sessionIndex).data_refs(refIndex);
-                    ref.relative_path = replace_prefix(string(ref.relative_path), oldFolder, newFolder);
+                    if isfield(ref, 'relative_path')
+                        ref.relative_path = replace_prefix(string(ref.relative_path), oldFolder, newFolder);
+                    end
                     if isfield(ref, 'project_copy_relative_path')
                         ref.project_copy_relative_path = replace_prefix(string(ref.project_copy_relative_path), oldFolder, newFolder);
                     end
+                    if isfield(ref, 'cache_relative_paths') && ~isempty(ref.cache_relative_paths)
+                        ref.cache_relative_paths = arrayfun(@(p) replace_prefix(string(p), oldFolder, newFolder), string(ref.cache_relative_paths));
+                    end
                     project.subjects(index).sessions(sessionIndex).data_refs(refIndex) = ref;
                 end
+                for channelIndex = 1:numel(project.subjects(index).sessions(sessionIndex).channels)
+                    if isfield(project.subjects(index).sessions(sessionIndex).channels(channelIndex), 'cache_relative_path')
+                        project.subjects(index).sessions(sessionIndex).channels(channelIndex).cache_relative_path = replace_prefix( ...
+                            string(project.subjects(index).sessions(sessionIndex).channels(channelIndex).cache_relative_path), oldFolder, newFolder);
+                    end
+                end
+                lfp_project_write_channel_manifest(project, project.subjects(index).sessions(sessionIndex));
             end
         end
         project = update_run_paths(project, oldFolder, newFolder);

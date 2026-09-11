@@ -43,6 +43,8 @@ EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会�
 
 结果比较页提供按 Subject、访视和状态筛选的稳定 ID 选择表，支持自定义比较组、按 Subject 等权的分组 PSD 曲线，以及分组频带功率条形图和被试代表点。重复 Session 先在被试内汇总，不能因为 Session 或通道更多而获得更大组权重；缺失频段不会补零。分析参数与结果页的频段表可启用、编辑、恢复默认并保存为项目模板，当前频段结构会随 AnalysisRun 保存。
 
+频带表的默认可编辑预设为 Delta [1,4]、Theta [4,8]、Alpha [8,13]、Beta [13,35]（启用），以及 Low Beta [13,20]、High Beta [20,35]（停用）。这些不是唯一的标准划分；启用状态、名称和边界会按当前 Session 保存，项目模板只有在点击“保存为项目默认”后才会更新。每个结果版本保存自己的频段快照，因此修改表格不会追溯改变旧结果。
+
 项目不调用 Python 封装；FieldTrip/原生 MATLAB 路径保持纯 MATLAB 运行。
 
 ## 快速启动 GUI
@@ -115,7 +117,7 @@ plotProjectComparison(comparison, Band="delta", Metric="totalPower");
 files = lfp_export_comparison(comparison, "comparison_output");
 ```
 
-`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签；通用 CSV 导入对话框可在确认阶段为每个选定信号列填写新的通道名称。`lfp_compare_project` 的最小比较对象是 Session–Channel 条目，允许同一 Session 的多个通道并保留自定义标签；不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
+`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。若旧索引中的引用失效，可明确调用 `lfp_project_repair_channel_caches` 验证或重建所选通道；它只使用项目归档的 Session MAT/CSV 和保存的映射，不修改原始 CSV。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签；通用 CSV 导入对话框可在确认阶段为每个选定信号列填写新的通道名称。`lfp_compare_project` 的最小比较对象是 Session–Channel 条目，允许同一 Session 的多个通道并保留自定义标签；不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
 
 项目管理 API 与 GUI 使用相同的稳定 ID、数据文件和结果缓存；GUI 不把不同 Session 的原始信号拼接计算。
 

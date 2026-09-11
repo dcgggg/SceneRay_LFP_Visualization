@@ -25,6 +25,11 @@ session.medication_state = get_string(sessionInfo, 'medication_state', "");
 session.stimulation_state = get_string(sessionInfo, 'stimulation_state', "");
 session.repeat_label = get_string(sessionInfo, 'repeat_label', "");
 session.notes = get_string(sessionInfo, 'notes', "");
+% Keep an empty Session override until the user runs/saves analysis.  The GUI
+% resolves this as an inherited copy of project.defaultConfig, so later edits
+% to the project template still affect untouched Sessions without modifying
+% an explicit Session-specific snapshot.
+session.analysis_config = struct();
 session.folder_relative_path = "";
 session.status = "no_data";
 if session_exists(project, session.session_id)

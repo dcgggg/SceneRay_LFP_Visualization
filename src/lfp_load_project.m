@@ -49,6 +49,19 @@ end
 if ~isfield(project, 'defaultConfig') || isempty(fieldnames(project.defaultConfig))
     project.defaultConfig = lfpDefaultConfig();
 end
+[definitions, activeBands] = lfp_get_band_definitions(project.defaultConfig);
+if ~isfield(project.defaultConfig, 'bandDefinitions') || isempty(project.defaultConfig.bandDefinitions)
+    project.defaultConfig.bandDefinitions = definitions;
+end
+if ~isfield(project.defaultConfig, 'bands') || isempty(project.defaultConfig.bands)
+    project.defaultConfig.bands = activeBands;
+end
+if ~isfield(project.defaultConfig, 'bandConfigVersion') || isempty(project.defaultConfig.bandConfigVersion)
+    project.defaultConfig.bandConfigVersion = "legacy-compat";
+end
+% Empty Session analysis_config means "inherit project.defaultConfig".  An
+% explicit non-empty struct is preserved verbatim so loading never overwrites
+% a Session-specific analysis snapshot.
 project.schema_version = max(double(project.schema_version), 4);
 end
 

@@ -29,18 +29,36 @@ try
         fieldName = char(name);
         if isfield(updates, fieldName), project.subjects(subjectIndex).sessions(sessionIndex).(fieldName) = string(updates.(fieldName)); end
     end
+    if isfield(updates, 'analysis_config')
+        if ~isstruct(updates.analysis_config), error('LFP:InvalidAnalysisConfig', 'Session analysis_config must be a struct.'); end
+        project.subjects(subjectIndex).sessions(sessionIndex).analysis_config = updates.analysis_config;
+    end
     project.subjects(subjectIndex).sessions(sessionIndex).folder_relative_path = newFolder;
     if strlength(newFolder) > 0
         session = project.subjects(subjectIndex).sessions(sessionIndex);
         for refIndex = 1:numel(session.data_refs)
             ref = session.data_refs(refIndex);
-            ref.relative_path = replace_prefix(string(ref.relative_path), oldFolder, newFolder);
+            if isfield(ref, 'relative_path')
+                ref.relative_path = replace_prefix(string(ref.relative_path), oldFolder, newFolder);
+            end
             if isfield(ref, 'project_copy_relative_path')
                 ref.project_copy_relative_path = replace_prefix(string(ref.project_copy_relative_path), oldFolder, newFolder);
             end
+            if isfield(ref, 'cache_relative_paths') && ~isempty(ref.cache_relative_paths)
+                ref.cache_relative_paths = arrayfun(@(p) replace_prefix(string(p), oldFolder, newFolder), string(ref.cache_relative_paths));
+            end
             session.data_refs(refIndex) = ref;
         end
+        for channelIndex = 1:numel(session.channels)
+            if isfield(session.channels(channelIndex), 'cache_relative_path')
+                session.channels(channelIndex).cache_relative_path = replace_prefix( ...
+                    string(session.channels(channelIndex).cache_relative_path), oldFolder, newFolder);
+            end
+        end
         project.subjects(subjectIndex).sessions(sessionIndex) = session;
+        % The manifest is moved with the Session folder, but its indexed
+        % relative paths must be rewritten after a rename as well.
+        lfp_project_write_channel_manifest(project, session);
         for runIndex = 1:numel(project.analysisRuns)
             if string(project.analysisRuns(runIndex).session_id) == sessionId && isfield(project.analysisRuns(runIndex), 'result_ref')
                 project.analysisRuns(runIndex).result_ref = replace_prefix(string(project.analysisRuns(runIndex).result_ref), oldFolder, newFolder);

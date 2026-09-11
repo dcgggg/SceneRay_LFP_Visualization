@@ -30,7 +30,7 @@ data=struct('time',t,'signal',randn(1000,1),'fs',1000,'channelLabels',"A",'units
 [project,~]=lfp_project_attach_data(project,sessionId,data,Save=false);
 verifyError(testCase,@() lfp_project_append_data(project,sessionId,data,Save=false),'LFP:DuplicateChannelSource');
 [session,~]=lfp_project_find_session(project,sessionId);cache=fullfile(root,session.channels(1).cache_relative_path);fid=fopen(cache,'w');fprintf(fid,'corrupt');fclose(fid);
-verifyError(testCase,@() lfp_project_get_channel_data(project,sessionId,string(session.channels(1).channel_id)),'LFP:ChannelCacheCorrupt');
+verifyError(testCase,@() lfp_project_get_channel_data(project,sessionId,string(session.channels(1).channel_id)),'LFP:ChannelCacheReadFailed');
 end
 
 function testDisableAndRemoveKeepCache(testCase)

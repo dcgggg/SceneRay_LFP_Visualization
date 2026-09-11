@@ -20,6 +20,7 @@ cfg.artifact.saturationAbsoluteThresholdUV = 5000;
 cfg.artifact.saturationRunLength = 5;
 cfg.artifact.highFrequencyWindowSeconds = 0.250;
 cfg.artifact.highFrequencyZ = 6;
+cfg.artifact.highFrequencyMinRunSeconds = 0.010;
 cfg.artifact.strictMode = true;
 cfg.artifact.strictWindowSeconds = 0.100;
 cfg.artifact.strictStepSeconds = 0.050;
@@ -63,9 +64,15 @@ cfg.bands = struct();
 cfg.bands.delta = [1 4];
 cfg.bands.theta = [4 8];
 cfg.bands.alpha = [8 13];
-cfg.bands.beta = [13 30];
+cfg.bands.beta = [13 35];
 cfg.bands.lowGamma = [30 55];
 cfg.bands.highGamma = [65 100];
+% Editable GUI presets. cfg.bands remains the legacy/API active-band
+% structure; bandDefinitions preserves disabled rows and exact user bounds.
+cfg.bandConfigVersion = "1.0";
+cfg.bandDefinitions = struct('name', {"Delta" "Theta" "Alpha" "Beta" "Low Beta" "High Beta"}, ...
+    'rangeHz', {[1 4] [4 8] [8 13] [13 35] [13 20] [20 35]}, ...
+    'enabled', {true true true true false false});
 
 cfg.plot = struct();
 cfg.plot.visible = "on";
@@ -103,6 +110,8 @@ metadata(end+1) = item("artifact.lineNoiseDetection", cfg.artifact.lineNoiseDete
     "Time-domain 40-Hz rejection; disabled by default so line noise can be interpolated only during fitting.", "Artifact");
 metadata(end+1) = item("artifact.strictMode", cfg.artifact.strictMode, "logical", "", [0 1], [], ...
     "Short-window high-frequency/burst detector; marks complete abnormal windows and joins short gaps.", "Artifact");
+metadata(end+1) = item("artifact.highFrequencyMinRunSeconds", cfg.artifact.highFrequencyMinRunSeconds, "double", "s", [0 Inf], [], ...
+    "Minimum contiguous duration required for the native high-frequency envelope detector.", "Artifact");
 metadata(end+1) = item("artifact.strictHighpassHz", cfg.artifact.strictHighpassHz, "double", "Hz", [0 Inf], [], ...
     "Approximate high-pass boundary for the strict detector; keep above retained LFP/line-noise frequencies.", "Artifact");
 metadata(end+1) = item("artifact.amplitudeZ", cfg.artifact.amplitudeZ, "double", "z", [0 Inf], [], ...
@@ -135,6 +144,8 @@ metadata(end+1) = item("fooof.maxNumberPeaks", cfg.fooof.maxNumberPeaks, "double
     "Maximum number of periodic peaks per channel.", "Spectral model");
 metadata(end+1) = item("bands", cfg.bands, "struct", "Hz", [], [], ...
     "Named frequency intervals used for total, relative, aperiodic and periodic power.", "Band power");
+metadata(end+1) = item("bandDefinitions", cfg.bandDefinitions, "struct", "Hz", [], [], ...
+    "Editable band presets; enabled rows are copied into bands for the current analysis.", "Band power");
 metadata(end+1) = item("plot.frequencyScale", cfg.plot.frequencyScale, "string", "", [], ...
     ["linear" "log"], "Frequency-axis scale for model plots.", "Plot");
 metadata(end+1) = item("plot.maxDisplayPoints", cfg.plot.maxDisplayPoints, "double", "points", [2 Inf], [], ...

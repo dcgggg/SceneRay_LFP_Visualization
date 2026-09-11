@@ -348,7 +348,18 @@ mask = false(size(x));
 if isempty(values), return; end
 sigma = robust_scale(values - median(values));
 if sigma > 0
-    mask = finite & envelope > median(values) + get_field(cfg, 'highFrequencyZ', 8) * sigma;
+    candidate = finite & envelope > median(values) + get_field(cfg, 'highFrequencyZ', 8) * sigma;
+    % A single-sample excursion in a smooth low-frequency sinusoid is not a
+    % high-frequency burst.  Require a short contiguous run so numerical
+    % derivative round-off cannot reject an otherwise clean PSD window.
+    minRun = max(2, round(get_field(cfg, 'highFrequencyMinRunSeconds', 0.01) * fs));
+    starts = find(diff([false; candidate; false]) == 1);
+    ends = find(diff([false; candidate; false]) == -1) - 1;
+    for index = 1:numel(starts)
+        if ends(index) - starts(index) + 1 >= minRun
+            mask(starts(index):ends(index)) = true;
+        end
+    end
 end
 end
 
