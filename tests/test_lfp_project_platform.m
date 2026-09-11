@@ -20,6 +20,11 @@ loaded = lfp_load_project(root);
 [loadedData, loadedSession] = lfp_project_get_session_data(loaded, "S01");
 verifyEqual(testCase, loadedData.signal, data1.signal);
 verifyEqual(testCase, string(loadedSession.visit_label), "Baseline");
+[project, mergedSession] = lfp_project_add_session_segment(project, "S01", fixture_segment(8, 15, "segment.csv"), struct('segment_id', "segment_2"));
+verifyEqual(testCase, size(mergedSession.channels, 2), 3);
+[mergedData, ~] = lfp_project_get_session_data(project, "S01");
+verifySize(testCase, mergedData.signal, [8000 3]);
+verifyError(testCase, @()lfp_project_add_session_segment(project, "S01", fixture_segment(7, 16, "bad.csv")), 'LFP:SessionSegmentMismatch');
 end
 
 function testAnalysisCreatesRunsAndSecondCallReuses(testCase)
@@ -70,7 +75,13 @@ function data = fixture_data(seconds, frequency, fileName)
 fs = 1000; time = (0:(seconds*fs-1))' / fs;
 data = struct('signal', [sin(2*pi*frequency*time), cos(2*pi*(frequency+2)*time)], ...
     'fs', fs, 'time', time, 'channelLabels', ["channel01" "channel12"], 'units', "uV", ...
-    'metadata', struct('sourceFileName', fileName, 'sourceFilePath', fileName));
+    'metadata', struct('sourceFileName', fileName, 'sourceFilePath', fileName), ...
+    'processingHistory', struct('operation', "import", 'parameters', struct(), 'notes', "fixture"));
+end
+
+function data = fixture_segment(seconds, frequency, fileName)
+data = fixture_data(seconds, frequency, fileName);
+data.signal = data.signal(:,1); data.channelLabels = "channel23"; data.channelNames = data.channelLabels;
 end
 
 function cleanup(root)

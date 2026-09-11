@@ -67,6 +67,12 @@ configuration reuses the saved result; changing PSD, artifact, specparam or
 analysis-range inputs creates a new run instead of silently overwriting a
 successful run.
 
+If separate files belong to the same synchronized Session, call
+`lfp_project_add_session_segment`. It requires identical sampling rates,
+sample counts and time vectors and rejects duplicate channel labels. Only
+after these checks pass are columns combined; a time gap, independent segment
+or mismatched length must be represented as a separate Session.
+
 `lfp_compare_project` accepts explicit Session IDs and returns a long table
 with `subject_id`, `session_id`, `visit_label`, `channel_id`, `run_id`,
 `band`, `metric`, `value`, `unit`, `aggregation`, `config_id` and `qc_status`.

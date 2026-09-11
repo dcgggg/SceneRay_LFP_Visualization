@@ -9,6 +9,7 @@
 - 新增 `AnalysisRun` 元数据、数据版本和仅计算参数指纹；同配置第二次分析复用有效结果。
 - 新增 `lfp_compare_project`，支持显式 Session 选择、visit_label 保留、通道级长表和配置不兼容提示。
 - 新增旧 MAT 数据迁移预览/显式迁移入口及 GUI-free 批处理入口。
+- 新增同一 Session 多文件同步 segment 追加接口，严格校验采样率、长度、时间轴和重复通道。
 - LFP 项目平台测试：3 项通过。
 
 ## 尚未完成
