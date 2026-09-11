@@ -16,6 +16,7 @@ verifyTrue(testCase, isgraphics(app.Controls.CompareAxes));
 verifyTrue(testCase, isgraphics(app.Controls.Welcome));
 verifyEqual(testCase, string(app.Controls.PsdMethod.Value), "multitaper");
 verifyEqual(testCase, app.Controls.PsdHigh.Value, 35);
+verifyEqual(testCase, string(app.Controls.ComparePlot.Value), "分组频带柱图");
 verifyFalse(testCase, any(contains(string({app.Controls.WorkspaceTabs.Children.Title}), "时频")));
 app.close();
 verifyFalse(testCase, isgraphics(app.Figure));
