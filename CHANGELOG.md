@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added relocatable nested project storage with automatic parent/name folder creation, collision-safe source CSV copies, and stable-ID Subject/Session folder references.
+- Added expanded comparison selection metadata, custom group labels, subject-weighted grouped PSD curves and grouped band-power bars with explicit SD definitions.
+- Added an editable per-project band-definition table with validation and compatibility with legacy field-style configurations.
+- Fixed GUI project analysis band-power failure when the new struct-array band representation is passed through the compatibility entry point.
+
 - Rebuilt the MATLAB-native GUI as a zero-input project workspace launched by `launch_gui`.
 - Added a welcome state, persistent project toolbar, stable-ID Subject/Session tree, focused data/analysis/comparison pages and a compact status bar.
 - Added metadata-first Session creation, CSV preview confirmation, editable channel display metadata and non-destructive index removal.

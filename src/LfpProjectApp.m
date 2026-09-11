@@ -12,6 +12,7 @@ classdef LfpProjectApp < handle
         CurrentData = struct()
         CurrentComparison = struct()
         CompareSelectedSessionIds = strings(0,1)
+        CompareGroupLabels = strings(0,1)
         Controls = struct()
         Dirty = false
         Busy = false
@@ -60,6 +61,13 @@ classdef LfpProjectApp < handle
             if nargin<4, description=""; end
             app.Project=lfp_create_project(string(root),string(name),Description=string(description));
             app.Dirty=false; app.resetSelection(); app.refreshProject(); app.showWorkspace("data");
+            app.setStatus("就绪","项目已创建；下一步请添加被试。",0);
+        end
+
+        function createProjectInParent(app,parent,name,description)
+            if nargin<4, description=""; end
+            project=lfp_create_project_in_parent(string(parent),string(name),Description=string(description));
+            app.Project=project; app.Dirty=false; app.resetSelection(); app.refreshProject(); app.showWorkspace("data");
             app.setStatus("就绪","项目已创建；下一步请添加被试。",0);
         end
 
@@ -185,11 +193,11 @@ classdef LfpProjectApp < handle
             hg=uigridlayout(holder,[1 1]);hg.Padding=[0 0 0 0];
             app.Controls.Welcome=uipanel(hg,'BorderType','none');
             app.Controls.Welcome.Layout.Row=1;app.Controls.Welcome.Layout.Column=1;
-            wg=uigridlayout(app.Controls.Welcome,[5 3]);wg.RowHeight={'1x',60,44,44,'1x'};wg.ColumnWidth={'1x',360,'1x'};
-            t=uilabel(wg,'Text','SceneRay LFP 项目分析','FontSize',24,'FontWeight','bold','HorizontalAlignment','center');t.Layout.Row=2;t.Layout.Column=2;
-            n=uilabel(wg,'Text','从空白项目开始，或继续已有项目。无需预先准备工作区变量。','HorizontalAlignment','center','WordWrap','on');n.Layout.Row=3;n.Layout.Column=2;
-            a=uigridlayout(wg,[1 2]);a.Layout.Row=4;a.Layout.Column=2;a.ColumnWidth={'1x','1x'};
-            uibutton(a,'Text','新建项目','ButtonPushedFcn',@(~,~)app.newProjectDialog());uibutton(a,'Text','打开项目','ButtonPushedFcn',@(~,~)app.openProjectDialog());
+            wg=uigridlayout(app.Controls.Welcome,[5 3]);wg.RowHeight={'1x',120,44,44,'1x'};wg.ColumnWidth={'1x',420,'1x'};
+            logo=uipanel(wg,'Title','LOGO','BorderType','line','ForegroundColor',[.75 .75 .75]);logo.Layout.Row=2;logo.Layout.Column=2;
+            lg=uigridlayout(logo,[1 1]);lg.Padding=[12 12 12 12];uilabel(lg,'Text','SceneRay LFP 项目分析','FontSize',22,'FontWeight','bold','HorizontalAlignment','center','FontColor',[.45 .45 .45]);
+            n=uilabel(wg,'Text','请使用顶部“新建项目”或“打开项目”。启动时不会自动导入数据。','HorizontalAlignment','center','WordWrap','on');n.Layout.Row=3;n.Layout.Column=2;
+            hint=uilabel(wg,'Text','项目将按 Subject → Session → Channel 组织，并保留原始数据。','HorizontalAlignment','center','WordWrap','on','FontColor',[.45 .45 .45]);hint.Layout.Row=4;hint.Layout.Column=2;
             app.Controls.WorkspaceTabs=uitabgroup(hg,'Visible','off','SelectionChangedFcn',@(~,~)app.onWorkspaceTabChanged());
             app.Controls.WorkspaceTabs.Layout.Row=1;app.Controls.WorkspaceTabs.Layout.Column=1;
             app.Controls.DataTab=uitab(app.Controls.WorkspaceTabs,'Title','数据管理');app.Controls.AnalysisTab=uitab(app.Controls.WorkspaceTabs,'Title','单次分析');app.Controls.CompareTab=uitab(app.Controls.WorkspaceTabs,'Title','结果比较');
@@ -244,8 +252,9 @@ classdef LfpProjectApp < handle
             uilabel(p,'Text','NW');app.Controls.PsdNW=uieditfield(p,'numeric','Value',3.5);uilabel(p,'Text','K');app.Controls.PsdK=uieditfield(p,'numeric','Value',6);uilabel(p,'Text','重叠');app.Controls.PsdOverlap=uieditfield(p,'numeric','Value',.5);
             st=uitab(tabs,'Title','specparam');s=uigridlayout(st,[2 8]);s.RowHeight={34,34};s.ColumnWidth={70,80,70,80,70,80,80,90};
             uilabel(s,'Text','模型');app.Controls.SpecMode=uidropdown(s,'Items',{'fixed','knee'},'Value','fixed');uilabel(s,'Text','下限 Hz');app.Controls.SpecLow=uieditfield(s,'numeric','Value',1);uilabel(s,'Text','上限 Hz');app.Controls.SpecHigh=uieditfield(s,'numeric','Value',35);uilabel(s,'Text','最大峰数');app.Controls.SpecPeaks=uieditfield(s,'numeric','Value',6);
-            bt=uitab(tabs,'Title','频带功率');b=uigridlayout(bt,[2 4]);b.RowHeight={34,34};b.ColumnWidth={90,180,90,'1x'};
-            uilabel(b,'Text','显示指标');app.Controls.BandMetric=uidropdown(b,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower','ValueChangedFcn',@(~,~)app.refreshAnalysisView());uilabel(b,'Text','频段范围');uilabel(b,'Text','来自项目配置；超出 PSD 范围会标记为不可计算。');
+            bt=uitab(tabs,'Title','频带功率');b=uigridlayout(bt,[2 1]);b.RowHeight={'1x',36};b.Padding=[4 4 4 4];
+            app.Controls.BandTable=uitable(b,'Data',band_table_data(lfpDefaultConfig().bands),'ColumnName',{'启用','频段名称','下限 (Hz)','上限 (Hz)'},'ColumnEditable',[true true true true],'RowName',[],'CellEditCallback',@(~,~)app.markDirty());
+            bb=uigridlayout(b,[1 4]);bb.ColumnWidth={110,130,'1x',220};bb.Padding=[0 0 0 0];app.Controls.ResetBands=uibutton(bb,'Text','恢复默认频段','ButtonPushedFcn',@(~,~)app.resetBandTable());app.Controls.SaveBandTemplate=uibutton(bb,'Text','保存为项目模板','ButtonPushedFcn',@(~,~)app.saveBandTemplate());uilabel(bb,'Text','显示指标');app.Controls.BandMetric=uidropdown(bb,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower','ValueChangedFcn',@(~,~)app.refreshAnalysisView());
         end
 
         function buildAnalysisResults(app,parent)
@@ -257,14 +266,14 @@ classdef LfpProjectApp < handle
         end
 
         function buildComparePage(app,parent)
-            g=uigridlayout(parent,[4 1]);app.Controls.CompareGrid=g;g.RowHeight={130,112,72,'1x'};g.Padding=[8 8 8 8];g.RowSpacing=6;
+            g=uigridlayout(parent,[4 1]);app.Controls.CompareGrid=g;g.RowHeight={220,220,78,'1x'};g.Padding=[8 8 8 8];g.RowSpacing=6;
             cp=uipanel(g,'Title','比较候选（筛选不会清除已选择对象）');c=uigridlayout(cp,[2 8]);c.RowHeight={32,'1x'};c.ColumnWidth={45,110,45,110,65,110,110,'1x'};
             uilabel(c,'Text','被试');app.Controls.FilterSubject=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','访视');app.Controls.FilterVisit=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());uilabel(c,'Text','分析状态');app.Controls.FilterStatus=uidropdown(c,'Items',{'全部'},'ValueChangedFcn',@(~,~)app.refreshComparisonCandidates());app.Controls.SelectFiltered=uibutton(c,'Text','全选筛选结果','ButtonPushedFcn',@(~,~)app.selectFiltered());app.Controls.ClearComparison=uibutton(c,'Text','清空选择','ButtonPushedFcn',@(~,~)app.clearComparisonSelection());
             app.Controls.CandidateTable=uitable(c,'Data',cell(0,7),'ColumnName',{'选择','被试','Session','访视','条件','结果状态','稳定 ID'},'ColumnEditable',[true false false false false false false],'RowName',[],'CellEditCallback',@(~,e)app.onCandidateEdited(e));app.Controls.CandidateTable.Layout.Row=2;app.Controls.CandidateTable.Layout.Column=[1 8];
-            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};left=uigridlayout(s,[2 1]);left.RowHeight={'1x',30};left.Padding=[0 0 0 0];app.Controls.SelectedSessions=uilistbox(left,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');lb=uigridlayout(left,[1 2]);lb.ColumnWidth={100,'1x'};lb.Padding=[0 0 0 0];app.Controls.RemoveSelectedComparison=uibutton(lb,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedComparison());app.Controls.SelectedCount=uilabel(lb,'Text','已选择 0 条','HorizontalAlignment','right');app.Controls.MappingTable=uitable(s,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
-            x=uigridlayout(g,[2 6]);x.RowHeight={32,32};x.ColumnWidth={55,120,65,120,120,'1x'};x.Padding=[0 0 0 0];
-            uilabel(x,'Text','指标');app.Controls.CompareMetric=uidropdown(x,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower');uilabel(x,'Text','频段');app.Controls.CompareBand=uidropdown(x,'Items',{'delta','theta','alpha','beta','lowGamma','highGamma'},'Value','beta');app.Controls.CompareButton=uibutton(x,'Text','比较','ButtonPushedFcn',@(~,~)app.onCompare(false));app.Controls.CompareStatus=uilabel(x,'Text','未比较');
-            uilabel(x,'Text','图形');app.Controls.ComparePlot=uidropdown(x,'Items',{'点图','柱状图'},'Value','点图','ValueChangedFcn',@(~,~)app.renderComparison());uilabel(x,'Text','汇总');app.Controls.CompareAggregation=uidropdown(x,'Items',{'session'},'Value','session');app.Controls.UnifyCompare=uibutton(x,'Text','统一参数重算','ButtonPushedFcn',@(~,~)app.onCompare(true));
+            sp=uipanel(g,'Title','已选择对象与通道映射');s=uigridlayout(sp,[1 2]);s.ColumnWidth={280,'1x'};left=uigridlayout(s,[2 1]);left.RowHeight={'1x',30};left.Padding=[0 0 0 0];app.Controls.SelectedSessions=uilistbox(left,'Items',{'(未选择)'},'Value',{'(未选择)'},'Multiselect','on');lb=uigridlayout(left,[1 2]);lb.ColumnWidth={100,'1x'};lb.Padding=[0 0 0 0];app.Controls.RemoveSelectedComparison=uibutton(lb,'Text','移除所选','ButtonPushedFcn',@(~,~)app.removeSelectedComparison());app.Controls.SelectedCount=uilabel(lb,'Text','已选择 0 条','HorizontalAlignment','right');right=uigridlayout(s,[2 1]);right.RowHeight={'1x',90};right.Padding=[0 0 0 0];app.Controls.SelectedObjectTable=uitable(right,'Data',cell(0,8),'ColumnName',{'被试','Session','访视','条件','通道','结果状态','比较组','稳定 ID'},'ColumnEditable',[false false false false false false true false],'RowName',[],'CellEditCallback',@(~,e)app.onSelectedObjectEdited(e));app.Controls.MappingTable=uitable(right,'Data',cell(0,3),'ColumnName',{'Session ID','选用通道','比较标签'},'ColumnEditable',[false true true],'RowName',[]);
+            x=uigridlayout(g,[2 8]);x.RowHeight={32,32};x.ColumnWidth={55,110,65,110,70,120,110,'1x'};x.Padding=[0 0 0 0];
+            uilabel(x,'Text','指标');app.Controls.CompareMetric=uidropdown(x,'Items',{'totalPower','relativePower','logTotalPower','aperiodicPower','periodicPower'},'Value','totalPower');uilabel(x,'Text','频段');app.Controls.CompareBand=uidropdown(x,'Items',{'delta','theta','alpha','beta','lowGamma','highGamma'},'Value','beta');uilabel(x,'Text','分组依据');app.Controls.CompareGroupingBasis=uidropdown(x,'Items',{'custom','subject_group','visit'},'Value','custom');app.Controls.CompareButton=uibutton(x,'Text','生成比较','ButtonPushedFcn',@(~,~)app.onCompare(false));app.Controls.CompareStatus=uilabel(x,'Text','未比较');
+            uilabel(x,'Text','图形');app.Controls.ComparePlot=uidropdown(x,'Items',{'点图','柱状图','分组 PSD','分组频带柱图'},'Value','点图','ValueChangedFcn',@(~,~)app.renderComparison());uilabel(x,'Text','汇总');app.Controls.CompareAggregation=uidropdown(x,'Items',{'session','subject'},'Value','session');uilabel(x,'Text','');app.Controls.UnifyCompare=uibutton(x,'Text','统一参数重算','ButtonPushedFcn',@(~,~)app.onCompare(true));
             res=uigridlayout(g,[1 2]);res.ColumnWidth={'1x',190};app.Controls.CompareAxes=uiaxes(res);tools=uigridlayout(res,[6 1]);tools.RowHeight={38,38,38,38,'1x',60};app.Controls.CompareSaveImage=uibutton(tools,'Text','保存图片','ButtonPushedFcn',@(~,~)app.saveComparisonImage());app.Controls.CompareExportData=uibutton(tools,'Text','导出比较数据','ButtonPushedFcn',@(~,~)app.exportComparisonData());app.Controls.CompareSavePlan=uibutton(tools,'Text','保存比较方案','ButtonPushedFcn',@(~,~)app.saveComparisonPlan());app.Controls.CompareDetails=uilabel(tools,'Text','缺失值不补零；跨被试不会连接为同一患者。','WordWrap','on','FontColor',[.35 .35 .35]);
         end
 
@@ -273,9 +282,33 @@ classdef LfpProjectApp < handle
         end
 
         function newProjectDialog(app)
-            a=inputdlg({'项目名称','可选描述'},'新建项目',[1 45;3 45],{'Human LFP project',''});if isempty(a),return;end
-            root=uigetdir('','选择项目保存位置');if isequal(root,0),return;end
-            try,app.createProjectAt(root,string(a{1}),string(a{2}));catch e,app.showError(e,'新建项目失败');end
+            dg=uifigure('Name','新建项目','WindowStyle','modal','Position',[360 300 620 300]);
+            g=uigridlayout(dg,[5 3]);g.RowHeight={34,34,34,70,42};g.ColumnWidth={100,'1x',100};g.Padding=[16 16 16 16];
+            uilabel(g,'Text','项目名称');name=uieditfield(g,'text','Value','Human LFP project');
+            uilabel(g,'Text','父目录');parent=uieditfield(g,'text','Value',char(pwd));browse=uibutton(g,'Text','浏览…','ButtonPushedFcn',@browseParent);
+            uilabel(g,'Text','保存路径预览');preview=uilabel(g,'Text','','Interpreter','none','WordWrap','on');preview.Layout.Column=[2 3];
+            uilabel(g,'Text','说明');description=uieditfield(g,'text','Value','');description.Layout.Column=[2 3];
+            buttons=uigridlayout(g,[1 2]);buttons.Layout.Row=5;buttons.Layout.Column=[2 3];buttons.ColumnWidth={'1x','1x'};uibutton(buttons,'Text','取消','ButtonPushedFcn',@cancel);uibutton(buttons,'Text','创建','ButtonPushedFcn',@accept);
+            name.ValueChangedFcn=@updatePreview;parent.ValueChangedFcn=@updatePreview;dg.CloseRequestFcn=@cancel;updatePreview();uiwait(dg);
+            if isgraphics(dg),result=dg.UserData;delete(dg);else,result=[];end
+            if ~isempty(result)
+                try,app.createProjectInParent(result.parent,result.name,result.description);catch e,app.showError(e,'新建项目失败');end
+            end
+            function updatePreview(~,~)
+                if strlength(strtrim(string(parent.Value)))==0||strlength(strtrim(string(name.Value)))==0,preview.Text='请输入父目录和项目名称';else,preview.Text=char(fullfile(string(parent.Value),string(name.Value)));end
+            end
+            function browseParent(~,~)
+                selected=uigetdir(char(parent.Value),'选择项目父目录');if ~isequal(selected,0),parent.Value=char(selected);updatePreview();end
+            end
+            function cancel(~,~),if isgraphics(dg),dg.UserData=[];uiresume(dg);end,end
+            function accept(~,~)
+                try
+                    parentRoot=string(parent.Value);projectName=string(name.Value);lfp_validate_folder_name(projectName,"项目名称");
+                    if ~isfolder(parentRoot),error('LFP:InvalidProjectParent','项目父目录不存在。');end
+                    dg.UserData=struct('parent',parentRoot,'name',projectName,'description',string(description.Value));uiresume(dg);
+                catch e,uialert(dg,string(e.message),'项目设置');
+                end
+            end
         end
 
         function openProjectDialog(app)
@@ -391,7 +424,7 @@ classdef LfpProjectApp < handle
                 subject=app.Project.subjects(i);sn=uitreenode(root,'Text',char(subject.display_name),'NodeData',struct('kind','subject','id',subject.subject_id));
                 for j=1:numel(subject.sessions),session=subject.sessions(j);label=session.visit_label;if strlength(label)==0,label=session.session_id;end;uitreenode(sn,'Text',char(label+"  ["+session.status+"]"),'NodeData',struct('kind','session','id',session.session_id));end
             end
-            expand(root);app.updateProjectHeader();app.refreshComparisonFilters();app.refreshComparisonCandidates();
+            expand(root);app.updateProjectHeader();app.refreshComparisonFilters();app.refreshComparisonBands();app.refreshComparisonCandidates();
         end
 
         function showProjectDetails(app)
@@ -446,13 +479,41 @@ classdef LfpProjectApp < handle
             cfg=app.Project.defaultConfig;cfg.artifact.amplitudeZ=app.Controls.ArtifactZ.Value;cfg.artifact.derivativeZ=app.Controls.JumpZ.Value;cfg.artifact.paddingSeconds=app.Controls.Padding.Value;
             cfg.psd.method=string(app.Controls.PsdMethod.Value);cfg.psd.windowLengthSec=app.Controls.PsdWindow.Value;cfg.psd.frequencyRange=[app.Controls.PsdLow.Value app.Controls.PsdHigh.Value];cfg.psd.overlapFraction=app.Controls.PsdOverlap.Value;cfg.psd.multitaper.timeBandwidthProduct=app.Controls.PsdNW.Value;
             cfg.psd.multitaper.taperCount=round(app.Controls.PsdK.Value);cfg.fooof.aperiodicMode=string(app.Controls.SpecMode.Value);cfg.fooof.frequencyRange=[app.Controls.SpecLow.Value app.Controls.SpecHigh.Value];cfg.fooof.maxNumberPeaks=round(app.Controls.SpecPeaks.Value);
+            cfg.bands=app.readBandsFromTable();
             if ~isempty(fieldnames(app.CurrentData))&&cfg.psd.frequencyRange(2)>app.CurrentData.fs/2,error('LFP:FrequencyAboveNyquist','PSD 上限 %.3g Hz 超过 Nyquist %.3g Hz。',cfg.psd.frequencyRange(2),app.CurrentData.fs/2);end
+        end
+
+        function bands=readBandsFromTable(app)
+            raw=app.Controls.BandTable.Data;if isempty(raw),error('LFP:InvalidBands','至少保留一个频段。');end
+            bands=struct('name',{},'rangeHz',{});names=strings(0,1);
+            for i=1:size(raw,1)
+                enabled=logical(raw{i,1});name=strtrim(string(raw{i,2}));low=double(raw{i,3});high=double(raw{i,4});
+                if ~enabled,continue;end
+                if strlength(name)==0||any(names==name),error('LFP:InvalidBands','频段名称不能为空且不能重复。');end
+                if ~isfinite(low)||~isfinite(high)||low<0||high<=low,error('LFP:InvalidBands','频段 %s 的边界必须满足 0≤下限<上限。',name);end
+                if ~isempty(fieldnames(app.CurrentData))&&high>double(app.CurrentData.fs)/2,error('LFP:FrequencyAboveNyquist','频段 %s 上限 %.3g Hz 超过 Nyquist。',name,high);end
+                names(end+1,1)=name;bands(end+1)=struct('name',name,'rangeHz',[low high]); %#ok<AGROW>
+            end
+            if isempty(bands),error('LFP:InvalidBands','至少启用一个频段。');end
         end
 
         function applyConfigToControls(app)
             if app.noProject(),return;end;c=app.Project.defaultConfig;app.Controls.ArtifactZ.Value=c.artifact.amplitudeZ;app.Controls.JumpZ.Value=c.artifact.derivativeZ;app.Controls.Padding.Value=c.artifact.paddingSeconds;
             app.Controls.PsdMethod.Value=char(c.psd.method);app.Controls.PsdWindow.Value=c.psd.windowLengthSec;app.Controls.PsdLow.Value=c.psd.frequencyRange(1);app.Controls.PsdHigh.Value=c.psd.frequencyRange(2);app.Controls.PsdOverlap.Value=c.psd.overlapFraction;app.Controls.PsdNW.Value=c.psd.multitaper.timeBandwidthProduct;app.Controls.PsdK.Value=c.psd.multitaper.taperCount;
             app.Controls.SpecMode.Value=char(c.fooof.aperiodicMode);app.Controls.SpecLow.Value=c.fooof.frequencyRange(1);app.Controls.SpecHigh.Value=c.fooof.frequencyRange(2);app.Controls.SpecPeaks.Value=c.fooof.maxNumberPeaks;
+            if isfield(c,'bands'),app.Controls.BandTable.Data=band_table_data(c.bands);end
+        end
+
+        function resetBandTable(app)
+            d=lfpDefaultConfig();app.Controls.BandTable.Data=band_table_data(d.bands);if ~app.noProject(),app.refreshComparisonBands();app.markDirty();end
+        end
+
+        function saveBandTemplate(app)
+            if app.noProject(),app.warn('请先创建或打开项目。');return;end
+            try
+                c=app.Project.defaultConfig;c.bands=app.readBandsFromTable();app.Project.defaultConfig=c;app.refreshComparisonBands();app.markDirty();app.saveProject();
+            catch e,app.showError(e,'保存频段模板失败');
+            end
         end
 
         function onRun(app),try,app.runSelectedAnalysis();catch e,app.showError(e,'分析失败');end,end
@@ -468,6 +529,13 @@ classdef LfpProjectApp < handle
             if app.noProject(),return;end
             subjects=string({app.Project.subjects.subject_id});visits=strings(0,1);statuses=strings(0,1);for i=1:numel(app.Project.subjects),visits=[visits;string({app.Project.subjects(i).sessions.visit_label})'];statuses=[statuses;string({app.Project.subjects(i).sessions.status})'];end %#ok<LFPS>
             app.setDropdownItems(app.Controls.FilterSubject,["全部";unique(subjects(:),'stable')]);app.setDropdownItems(app.Controls.FilterVisit,["全部";unique(visits(strlength(visits)>0),'stable')]);app.setDropdownItems(app.Controls.FilterStatus,["全部";unique(statuses(strlength(statuses)>0),'stable')]);
+        end
+
+        function refreshComparisonBands(app)
+            if ~isfield(app.Controls,'CompareBand'),return;end
+            names=project_band_names(app.Project);
+            if isempty(names),names="beta";end
+            app.setDropdownItems(app.Controls.CompareBand,names);
         end
 
         function refreshComparisonCandidates(app)
@@ -486,30 +554,66 @@ classdef LfpProjectApp < handle
             row=event.Indices(1);data=app.Controls.CandidateTable.Data;id=string(data{row,7});if logical(data{row,1}),app.CompareSelectedSessionIds=unique([app.CompareSelectedSessionIds;id],'stable');else,app.CompareSelectedSessionIds(app.CompareSelectedSessionIds==id)=[];end;app.refreshSelectedSessions();
         end
         function selectFiltered(app),data=app.Controls.CandidateTable.Data;if isempty(data),return;end;app.CompareSelectedSessionIds=unique([app.CompareSelectedSessionIds;string(data(:,7))],'stable');app.refreshComparisonCandidates();end
-        function clearComparisonSelection(app),app.CompareSelectedSessionIds=strings(0,1);app.refreshComparisonCandidates();end
-        function removeSelectedComparison(app),selected=string(app.Controls.SelectedSessions.Value);selected=selected(selected~="(未选择)");app.CompareSelectedSessionIds(ismember(app.CompareSelectedSessionIds,selected))=[];app.refreshComparisonCandidates();end
+        function clearComparisonSelection(app),app.CompareSelectedSessionIds=strings(0,1);app.CompareGroupLabels=strings(0,1);app.refreshComparisonCandidates();end
+        function removeSelectedComparison(app),selected=string(app.Controls.SelectedSessions.Value);selected=selected(selected~="(未选择)");keep=~ismember(app.CompareSelectedSessionIds,selected);app.CompareSelectedSessionIds=app.CompareSelectedSessionIds(keep);app.CompareGroupLabels=app.CompareGroupLabels(keep);app.refreshComparisonCandidates();end
 
         function refreshSelectedSessions(app)
-            app.Controls.SelectedCount.Text=char("已选择 "+string(numel(app.CompareSelectedSessionIds))+" 条");if isempty(app.CompareSelectedSessionIds),app.Controls.SelectedSessions.Items={'(未选择)'};app.Controls.SelectedSessions.Value={'(未选择)'};app.Controls.MappingTable.Data=cell(0,3);return;end
-            app.Controls.SelectedSessions.Items=cellstr(app.CompareSelectedSessionIds);app.Controls.SelectedSessions.Value=char(app.CompareSelectedSessionIds(1));old=app.Controls.MappingTable.Data;rows=cell(numel(app.CompareSelectedSessionIds),3);
-            for i=1:numel(app.CompareSelectedSessionIds),id=app.CompareSelectedSessionIds(i);[session,~]=lfp_project_find_session(app.Project,id);channel="";if ~isempty(session)&&~isempty(session.channels),channel=string(session.channels(1).original_label);end
-                if ~isempty(old),match=find(string(old(:,1))==id,1);if ~isempty(match),channel=string(old{match,2});target=string(old{match,3});else,target=channel;end;else,target=channel;end;rows(i,:)={char(id),char(channel),char(target)};
+            ids=app.CompareSelectedSessionIds(:);app.Controls.SelectedCount.Text=char("已选择 "+string(numel(ids))+" 条（"+string(numel(unique(app.subject_ids_for_sessions(ids))))+" 个被试）");
+            if isempty(ids)
+                app.Controls.SelectedSessions.Items={'(未选择)'};app.Controls.SelectedSessions.Value={'(未选择)'};app.Controls.MappingTable.Data=cell(0,3);app.Controls.SelectedObjectTable.Data=cell(0,8);app.CompareGroupLabels=strings(0,1);return;
             end
-            app.Controls.MappingTable.Data=rows;
+            app.Controls.SelectedSessions.Items=cellstr(ids);app.Controls.SelectedSessions.Value=char(ids(1));old=app.Controls.MappingTable.Data;oldObjects=app.Controls.SelectedObjectTable.Data;mappingRows=cell(numel(ids),3);objectRows=cell(numel(ids),8);groups=strings(numel(ids),1);
+            for i=1:numel(ids)
+                id=ids(i);[session,subject]=lfp_project_find_session(app.Project,id);channel="";visit="";condition="";status="";subjectId="";group="Group 1";
+                if ~isempty(session)
+                    subjectId=string(subject.subject_id);visit=string(session.visit_label);condition=strtrim(string(session.medication_state)+" "+string(session.stimulation_state));status=string(session.status);
+                    if ~isempty(session.channels),channel=string(session.channels(1).original_label);end
+                    group=default_compare_group(app,session,subject);
+                end
+                if ~isempty(old),match=find(string(old(:,1))==id,1);if ~isempty(match),channel=string(old{match,2});target=string(old{match,3});else,target=channel;end;else,target=channel;end
+                if ~isempty(oldObjects),match=find(string(oldObjects(:,8))==id,1);if ~isempty(match)&&size(oldObjects,2)>=7,group=string(oldObjects{match,7});end;end
+                if strlength(group)==0,group="Group 1";end;groups(i)=group;mappingRows(i,:)={char(id),char(channel),char(target)};objectRows(i,:)={char(subjectId),char(id),char(visit),char(condition),char(channel),char(status),char(group),char(id)};
+            end
+            app.CompareGroupLabels=groups;app.Controls.MappingTable.Data=mappingRows;app.Controls.SelectedObjectTable.Data=objectRows;
+        end
+
+        function onSelectedObjectEdited(app,event)
+            if isempty(event.Indices),return;end;row=event.Indices(1);if size(app.Controls.SelectedObjectTable.Data,2)<8,return;end
+            id=string(app.Controls.SelectedObjectTable.Data{row,8});group=string(app.Controls.SelectedObjectTable.Data{row,7});idx=find(app.CompareSelectedSessionIds==id,1);if ~isempty(idx),app.CompareGroupLabels(idx)=group;end
+        end
+
+        function ids=subject_ids_for_sessions(app,ids)
+            ids=string(ids(:));out=strings(0,1);for k=1:numel(ids),[~,subject]=lfp_project_find_session(app.Project,ids(k));if ~isempty(subject),out(end+1,1)=string(subject.subject_id);end,end;ids=out;
+        end
+
+        function group=default_compare_group(app,session,subject)
+            basis="custom";if isfield(app.Controls,'CompareGroupingBasis'),basis=string(app.Controls.CompareGroupingBasis.Value);end
+            switch lower(basis),case "subject_group",group=string(subject.group);case "visit",group=string(session.visit_label);otherwise,group="Group 1";end
+            if strlength(group)==0,group="未分组";end
         end
 
         function spec=readComparisonSpec(app)
-            ids=app.CompareSelectedSessionIds(:);subjects=strings(numel(ids),1);mapping=repmat(struct('session_id',"",'channel_id',"",'channel_label',"",'target_label',""),numel(ids),1);rows=app.Controls.MappingTable.Data;
+            ids=app.CompareSelectedSessionIds(:);subjects=strings(numel(ids),1);mapping=repmat(struct('session_id',"",'channel_id',"",'channel_label',"",'target_label',"",'group_label',""),numel(ids),1);rows=app.Controls.MappingTable.Data;
             for i=1:numel(ids),[session,subject]=lfp_project_find_session(app.Project,ids(i));subjects(i)=subject.subject_id;chosen=string(rows{i,2});target=string(rows{i,3});labels=string({session.channels.original_label});display=string({session.channels.display_label});idx=find(labels==chosen|display==chosen,1);if isempty(idx),error('LFP:ChannelMappingMissing','Session %s 中不存在通道 %s。',ids(i),chosen);end
-                mapping(i)=struct('session_id',ids(i),'channel_id',string(session.channels(idx).channel_id),'channel_label',string(session.channels(idx).original_label),'target_label',target);
+                group="Group 1";if numel(app.CompareGroupLabels)>=i,group=string(app.CompareGroupLabels(i));end
+                mapping(i)=struct('session_id',ids(i),'channel_id',string(session.channels(idx).channel_id),'channel_label',string(session.channels(idx).original_label),'target_label',target,'group_label',group);
             end
             type="between_subjects";if numel(unique(subjects))==1,type="within_subject";end
-            spec=struct('type',type,'session_ids',ids,'subject_ids',unique(subjects),'bands',string(app.Controls.CompareBand.Value),'metric',string(app.Controls.CompareMetric.Value),'aggregation',string(app.Controls.CompareAggregation.Value),'channel_mapping',mapping,'plot_settings',struct('type',string(app.Controls.ComparePlot.Value)));
+            basis=string(app.Controls.CompareGroupingBasis.Value);groups=unique(string({mapping.group_label})','stable');defs=repmat(struct('group_label',"",'basis',basis,'session_ids',strings(0,1),'subject_ids',strings(0,1)),numel(groups),1);for k=1:numel(groups),defs(k).group_label=groups(k);defs(k).session_ids=ids(string({mapping.group_label})'==groups(k));defs(k).subject_ids=unique(subjects(string({mapping.group_label})'==groups(k)),'stable');end
+            spec=struct('type',type,'session_ids',ids,'subject_ids',unique(subjects),'bands',string(app.Controls.CompareBand.Value),'metric',string(app.Controls.CompareMetric.Value),'aggregation',string(app.Controls.CompareAggregation.Value),'channel_mapping',mapping,'grouping_basis',basis,'group_defs',defs,'plot_settings',struct('type',string(app.Controls.ComparePlot.Value)));
         end
 
         function onCompare(app,unify),try,app.compareSelected(unify);catch e,app.showError(e,'比较失败');end,end
         function renderComparison(app)
             ax=app.Controls.CompareAxes;cla(ax,'reset');if isempty(fieldnames(app.CurrentComparison)),text(ax,.5,.5,'请选择比较对象并运行比较','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
+            mode=string(app.Controls.ComparePlot.Value);
+            if mode=="分组 PSD"
+                if ~isfield(app.CurrentComparison,'psd_summary')||~isstruct(app.CurrentComparison.psd_summary)||isempty(app.CurrentComparison.psd_summary.psd),text(ax,.5,.5,'没有可用 PSD 比较结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
+                plotGroupedPsdComparison(app.CurrentComparison.psd_summary,Parent=ax,Visible="off");app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | 分组 PSD");return;
+            elseif mode=="分组频带柱图"
+                if ~isfield(app.CurrentComparison,'result_table')||isempty(app.CurrentComparison.result_table),text(ax,.5,.5,'没有可比较的频带结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
+                plotGroupedBandPower(app.CurrentComparison,Parent=ax,Metric=string(app.Controls.CompareMetric.Value),Visible="off");app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | 分组频带");return;
+            end
             tbl=app.CurrentComparison.result_table;if isempty(tbl),text(ax,.5,.5,'没有可比较的有效结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
             labels=string(tbl.subject_id)+" / "+string(tbl.visit_label)+" / "+string(tbl.channel_label);values=double(tbl.value(:));x=(1:numel(values))';if string(app.Controls.ComparePlot.Value)=="柱状图",bar(ax,x,values,'FaceColor',[.15 .45 .75]);else,scatter(ax,x,values,60,[.1 .4 .8],'filled');end
             xticks(ax,x);xlim(ax,[.5 numel(values)+.5]);xticklabels(ax,cellstr(labels));xtickangle(ax,25);grid(ax,'on');ylabel(ax,string(tbl.metric(1))+" ("+string(tbl.unit(1))+")",'Interpreter','none');title(ax,string(app.CurrentComparison.type)+" | "+string(tbl.band(1)),'Interpreter','none');app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | "+string(height(tbl))+" 点");
@@ -520,10 +624,12 @@ classdef LfpProjectApp < handle
             saved=app.Project.comparisons(end);app.CompareSelectedSessionIds=string(saved.session_ids(:));
             if isfield(saved,'metric')&&any(string(app.Controls.CompareMetric.Items)==string(saved.metric)),app.Controls.CompareMetric.Value=char(saved.metric);end
             if isfield(saved,'bands')&&~isempty(saved.bands)&&any(string(app.Controls.CompareBand.Items)==string(saved.bands(1))),app.Controls.CompareBand.Value=char(saved.bands(1));end
+            if isfield(saved,'grouping_basis')&&any(string(app.Controls.CompareGroupingBasis.Items)==string(saved.grouping_basis)),app.Controls.CompareGroupingBasis.Value=char(saved.grouping_basis);end
             app.refreshComparisonCandidates();
             if isfield(saved,'channel_mapping')&&~isempty(saved.channel_mapping)
                 rows=cell(numel(saved.channel_mapping),3);
-                for i=1:numel(saved.channel_mapping),m=saved.channel_mapping(i);label="";if isfield(m,'channel_label'),label=string(m.channel_label);end;target=label;if isfield(m,'target_label')&&strlength(string(m.target_label))>0,target=string(m.target_label);end;rows(i,:)={char(string(m.session_id)),char(label),char(target)};end
+                for i=1:numel(saved.channel_mapping),m=saved.channel_mapping(i);label="";if isfield(m,'channel_label'),label=string(m.channel_label);end;target=label;if isfield(m,'target_label')&&strlength(string(m.target_label))>0,target=string(m.target_label);end;rows(i,:)={char(string(m.session_id)),char(label),char(target)};if isfield(m,'group_label')&&i<=numel(app.CompareGroupLabels),app.CompareGroupLabels(i)=string(m.group_label);end;end
+                app.refreshSelectedSessions();
                 app.Controls.MappingTable.Data=rows;
             end
             if isfield(saved,'result_table')&&istable(saved.result_table)&&~isempty(saved.result_table),app.CurrentComparison=saved;app.renderComparison();end
@@ -556,14 +662,14 @@ classdef LfpProjectApp < handle
             end
             app.CompactMode=app.Figure.Position(3)<1300;
             if app.CompactMode
-                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={130,112,68,'1x'};end
+                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={190,190,78,'1x'};end
                 if app.NavigationOnly
                     app.Controls.BodyGrid.ColumnWidth={'1x',0};app.Controls.NavigationPanel.Visible='on';app.Controls.WorkspacePanel.Visible='off';app.Controls.ToggleNavigation.Text='返回工作区';
                 else
                     app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.WorkspacePanel.Visible='on';app.Controls.ToggleNavigation.Text='打开导航';
                 end
             else
-                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={130,112,72,'1x'};end
+                if isfield(app.Controls,'CompareGrid'),app.Controls.CompareGrid.RowHeight={220,220,78,'1x'};end
                 app.NavigationOnly=false;app.Controls.WorkspacePanel.Visible='on';
                 if app.NavigationCollapsed
                     app.Controls.BodyGrid.ColumnWidth={0,'1x'};app.Controls.NavigationPanel.Visible='off';app.Controls.ToggleNavigation.Text='打开导航';
@@ -594,4 +700,27 @@ end
 
 function value=clean_text(value)
 value=string(value);value=value(~ismissing(value));if isempty(value),value="";else,value=join(value,"；");end
+end
+
+function rows = band_table_data(bands)
+if isstruct(bands) && numel(bands)>0 && isfield(bands,'name') && isfield(bands,'rangeHz')
+    names=string({bands.name})';ranges={bands.rangeHz};
+else
+    names=string(fieldnames(bands));ranges=cell(numel(names),1);
+    for i=1:numel(names),ranges{i}=bands.(char(names(i)));end
+end
+rows=cell(numel(names),4);
+for i=1:numel(names),range=double(ranges{i});rows(i,:)={true,char(names(i)),double(range(1)),double(range(2))};end
+end
+
+function names = project_band_names(project)
+names=strings(0,1);
+if ~isstruct(project)||~isfield(project,'defaultConfig')||~isstruct(project.defaultConfig)||~isfield(project.defaultConfig,'bands'),return;end
+bands=project.defaultConfig.bands;
+if isstruct(bands)&&numel(bands)>0&&isfield(bands,'name')
+    names=string({bands.name})';
+elseif isstruct(bands)
+    names=string(fieldnames(bands));
+end
+names=unique(names(strlength(names)>0),'stable');
 end

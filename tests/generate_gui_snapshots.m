@@ -8,10 +8,11 @@ else
     root=fileparts(fileparts(mfilename('fullpath')));
 end
 addpath(fullfile(root,'src'));if ~isfolder(outputFolder),mkdir(outputFolder);end
-projectRoot=string(tempname);mkdir(projectRoot);cleanup=onCleanup(@()cleanup_all(projectRoot)); %#ok<NASGU>
+projectParent=string(tempname);mkdir(projectParent);cleanup=onCleanup(@()cleanup_all(projectParent)); %#ok<NASGU>
+projectRoot=fullfile(projectParent,"Human LFP study");
 files=strings(7,1);app=launchLfpProjectApp(Visible="off");appCleanup=onCleanup(@()app.close(true)); %#ok<NASGU>
 files(1)=fullfile(outputFolder,'01-welcome.png');app.exportSnapshot(files(1));
-app.createProjectAt(projectRoot,"Human LFP study","GUI acceptance project");app.Project.defaultConfig.artifact.strictMode=false;
+app.createProjectInParent(projectParent,"Human LFP study","GUI acceptance project");app.Project.defaultConfig.artifact.strictMode=false;
 app.Project.defaultConfig.psd.maxArtifactFraction=1;
 for subject=["P01" "P02"]
     app.addSubjectRecord(struct('subject_id',subject,'display_name',subject));

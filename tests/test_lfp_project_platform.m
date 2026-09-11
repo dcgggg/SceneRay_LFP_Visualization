@@ -148,6 +148,8 @@ spec = struct('type', "between_subjects", 'session_ids', [s1.session_id s2.sessi
 verifyEqual(testCase, string(comparison.psd_summary.status), "ok");
 verifyEqual(testCase, numel(comparison.psd_summary.group_labels_unique), 2);
 verifyEqual(testCase, string(comparison.result_table.group_label), ["Control"; "Treatment"]);
+[project, plan] = lfp_save_comparison_plan(project, spec);
+verifyTrue(testCase, isfile(fullfile(root, "comparisons", plan.comparison_id + ".mat")));
 h1 = plotGroupedPsdComparison(comparison.psd_summary, Visible="off"); testCase.addTeardown(@() close_if_valid(h1.figure));
 h2 = plotGroupedBandPower(comparison, Visible="off"); testCase.addTeardown(@() close_if_valid(h2.figure));
 verifyTrue(testCase, isgraphics(h1.axes)); verifyTrue(testCase, isgraphics(h2.axes));

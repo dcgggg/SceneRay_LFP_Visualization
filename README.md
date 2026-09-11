@@ -39,6 +39,10 @@ EEGLAB 和 Python `specparam` 当前没有被项目代码调用，因此不会�
 
 当前已完成 SceneRay/通用 CSV 导入、导入预览与确认、非破坏性伪影标记、FieldTrip/native artifact backend、artifact-aware Welch 与 DPSS Multitaper PSD、fixed/knee specparam 参数化、Gaussian 周期峰、频带功率点图、结果导出以及 MATLAB 原生项目 GUI。主界面把每份记录绑定到明确的 Subject/Session，Session 内保留同步的 samples × channels 数组，禁止跨记录拼接计算 PSD。SceneRay 导入器通过寻找每个 `Channel` 元数据行自动识别通道数，并在每个块内部寻找对应的 `Time Index, Voltage, Tag Code` 表头；通用 CSV 可在 GUI 中确认表头、时间列、信号列、采样率和单位。伪影只写入掩码和处理副本，不覆盖原始信号。
 
+通过顶部“新建项目”创建的项目会自动建立可移动的目录：`subjects/<显示名>__<稳定ID>/<Session显示名>__<稳定ID>/` 下保存 `subject.mat`、`session.mat`、`data/`、`configs/`、`results/` 和 `exports/`，项目级比较方案、导出文件和日志分别位于 `comparisons/`、`exports/` 和 `logs/`。导入的源 CSV 会复制到对应 Session 的 `data/`（同名文件自动加后缀），原文件和原始路径仍保留。Subject/Session 重命名只更新显示名和相对引用，稳定 ID 不变；旧的根目录 `data/`/`results/` 项目仍按兼容模式读取。
+
+结果比较页提供按 Subject、访视和状态筛选的稳定 ID 选择表，支持自定义比较组、按 Subject 等权的分组 PSD 曲线，以及分组频带功率条形图和被试代表点。重复 Session 先在被试内汇总，不能因为 Session 或通道更多而获得更大组权重；缺失频段不会补零。单次分析页的频段表可启用、编辑、恢复默认并保存为项目模板，当前频段结构会随 AnalysisRun 保存。
+
 项目不调用 Python 封装；FieldTrip/原生 MATLAB 路径保持纯 MATLAB 运行。
 
 ## 快速启动 GUI

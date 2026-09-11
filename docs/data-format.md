@@ -66,6 +66,17 @@ original CSV or the project's stored data/result files. Editable display labels,
 side, region, contacts and reference can be edited without changing
 `channel_id` or `original_label`.
 
+GUI-created projects use a nested, relocatable layout. `project.mat` stores
+`storage_mode="subject_session"`; each Subject has a stable-ID folder recorded
+in `folder_relative_path`, and each Session has its own stable-ID folder with
+`data/`, `configs/`, `results/` and `exports/`. `data_refs.relative_path` and
+`data_refs.project_copy_relative_path` are relative to the project root. The
+imported source CSV is copied into the Session `data/` directory without
+altering the source file; identical source names receive a suffix. Renaming a
+Subject or Session changes only display metadata and these relative references,
+while stable IDs remain unchanged. Legacy projects with empty folder fields
+continue to use their existing root-level references.
+
 For a direct import bridge, `lfp_project_add_csv_session` accepts either the
 SceneRay block format or explicit generic-CSV import settings. It never
 derives patient or visit identity from a filename.
@@ -93,3 +104,12 @@ incompatible runs. They do not perform group-level significance tests or
 silently average repeated tests. `lfp_preview_legacy_dataset` provides a
 read-only migration preview; `lfp_migrate_legacy_dataset` requires explicit
 Subject and Session IDs and never deletes the source file.
+
+Comparison selections are stored by stable Session ID. A comparison mapping may
+define a custom `group_label` per Session, with `grouping_basis` recorded as
+`custom`, `subject_group` or `visit`; this does not change the Subject's stored
+research group. Grouped PSD summaries first average repeated Sessions within a
+Subject and then average Subjects with equal weight. Grouped band-power plots
+use the same hierarchy and report SD only when at least two Subject values are
+available. Missing or out-of-range band values remain missing and are not
+replaced by zeros.
