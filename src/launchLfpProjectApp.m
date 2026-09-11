@@ -6,6 +6,10 @@ function app = launchLfpProjectApp(options)
 
 arguments
     options.Visible (1,1) string = "on"
+    options.ProjectRoot (1,1) string = ""
 end
 app = LfpProjectApp(options.Visible);
+if strlength(options.ProjectRoot)>0
+    app.loadProjectFrom(options.ProjectRoot);
+end
 end
