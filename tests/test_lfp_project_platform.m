@@ -69,6 +69,8 @@ verifyTrue(testCase, isfile(fullfile(root, "comparisons", comparison.comparison_
 handles = plotProjectComparison(comparison, Visible="off", Band="alpha", Metric="totalPower");
 testCase.addTeardown(@() close_if_valid(handles.figure));
 verifyTrue(testCase, isgraphics(handles.axes));
+exportFolder = fullfile(root, "comparison_export"); files = lfp_export_comparison(comparison, exportFolder);
+verifyTrue(testCase, isfile(files.csv)); verifyTrue(testCase, isfile(files.mat));
 end
 
 function data = fixture_data(seconds, frequency, fileName)

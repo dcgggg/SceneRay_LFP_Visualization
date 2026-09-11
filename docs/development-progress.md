@@ -10,6 +10,8 @@
 - 新增 `lfp_compare_project`，支持显式 Session 选择、visit_label 保留、通道级长表和配置不兼容提示。
 - 新增旧 MAT 数据迁移预览/显式迁移入口及 GUI-free 批处理入口。
 - 新增同一 Session 多文件同步 segment 追加接口，严格校验采样率、长度、时间轴和重复通道。
+- 新增 CSV 到显式 Session 的导入桥接函数，支持 SceneRay 与已确认的通用 CSV 设置。
+- 新增比较长表 CSV/MAT 导出函数，保留每行来源 run_id 和配置指纹。
 - LFP 项目平台测试：3 项通过。
 
 ## 尚未完成

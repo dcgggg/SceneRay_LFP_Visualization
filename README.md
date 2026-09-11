@@ -74,11 +74,14 @@ data = lfp_import_scenray_csv("recording.csv");
 [project, ~] = lfp_project_add_session(project, "P01", data, ...
     struct('session_id', "P01_Baseline", 'visit_label', "Baseline", ...
            'medication_state', "off", 'stimulation_state', "on"));
+[project, ~] = lfp_project_add_csv_session(project, "P01", "recording2.csv", ...
+    struct('session_id', "P01_Day07", 'visit_label', "Day07"));
 [project, runSummary] = lfp_analyze_project(project, "P01_Baseline");
 spec = struct('type', "within_subject", 'session_ids', "P01_Baseline", ...
     'bands', "delta", 'metric', "totalPower");
 [project, comparison] = lfp_compare_project(project, spec);
 plotProjectComparison(comparison, Band="delta", Metric="totalPower");
+files = lfp_export_comparison(comparison, "comparison_output");
 ```
 
 `lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。

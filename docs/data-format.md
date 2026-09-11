@@ -58,6 +58,10 @@ display labels change. Channel strings such as `channel01` retain leading
 zeros; bipolar labels remain their original labels until a user-provided
 mapping specifies side, region, contacts or reference.
 
+For a direct import bridge, `lfp_project_add_csv_session` accepts either the
+SceneRay block format or explicit generic-CSV import settings. It never
+derives patient or visit identity from a filename.
+
 The project index is kept lightweight. Raw data are stored in a per-Session
 MAT file, while every analysis is stored as an `AnalysisRun` with a data
 version, computation configuration fingerprint, complete configuration,
