@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added a persistent `Project -> Subject -> Session -> Channel` data model with stable IDs and per-Session raw-data references.
+- Added versioned `AnalysisRun` persistence, content-sensitive data/config fingerprints, independent Session analysis and cache reuse.
+- Added explicit comparison long tables, legacy migration preview/entry points and a GUI-free batch runner with a project write lock.
+- Added MATLAB tests covering multi-Session storage, multi-channel identity, analysis reuse and visit-based comparison.
+
 ## [0.9.0] - 2026-09-10
 
 - Removed the time-frequency analysis module from the GUI, PSD execution chain, export path and dedicated tests; legacy time-frequency fields are ignored when loading older sessions.

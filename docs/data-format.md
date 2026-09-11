@@ -38,3 +38,40 @@ Both adapters record `metadata.fileSizeBytes`, `metadata.importStrategy`, and `m
 - Reject empty signals, empty channels, non-finite sampling rates, and inconsistent channel lengths.
 - Handle NaN/Inf explicitly and record the policy in `processingHistory`.
 - Do not infer anatomical electrode location from contact numbers alone.
+
+## Project data model
+
+Project mode uses four stable identity levels:
+
+```text
+Project
+  └─ Subject (subject_id)
+      └─ Session (session_id, visit_label, conditions)
+          └─ Channel (channel_id, original_label, mapping metadata)
+```
+
+Create a project with `lfp_create_project(root, name)`, add explicit Subject
+and Session identities with `lfp_project_add_subject` and
+`lfp_project_add_session`, and load raw arrays with
+`lfp_project_get_session_data`. IDs are persisted and are not regenerated when
+display labels change. Channel strings such as `channel01` retain leading
+zeros; bipolar labels remain their original labels until a user-provided
+mapping specifies side, region, contacts or reference.
+
+The project index is kept lightweight. Raw data are stored in a per-Session
+MAT file, while every analysis is stored as an `AnalysisRun` with a data
+version, computation configuration fingerprint, complete configuration,
+module statuses and a result reference. `lfp_analyze_project` never joins
+different Sessions into one PSD. A second run with the same data version and
+configuration reuses the saved result; changing PSD, artifact, specparam or
+analysis-range inputs creates a new run instead of silently overwriting a
+successful run.
+
+`lfp_compare_project` accepts explicit Session IDs and returns a long table
+with `subject_id`, `session_id`, `visit_label`, `channel_id`, `run_id`,
+`band`, `metric`, `value`, `unit`, `aggregation`, `config_id` and `qc_status`.
+Comparisons match visits by `visit_label`/conditions and report missing or
+incompatible runs. They do not perform group-level significance tests or
+silently average repeated tests. `lfp_preview_legacy_dataset` provides a
+read-only migration preview; `lfp_migrate_legacy_dataset` requires explicit
+Subject and Session IDs and never deletes the source file.

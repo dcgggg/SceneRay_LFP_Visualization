@@ -2,7 +2,7 @@
 
 模块化、可测试的 MATLAB 局部场电位（LFP）分析与可视化项目。当前版本同时提供脚本/API 工作流和 MATLAB 原生 GUI；GUI 只负责交互与状态管理，算法仍可脱离界面调用。
 
-当前本地开发版本：**v0.9.0**。本版本移除时频分析链路，修复 specparam 与频带功率协作、结果状态和频段越界标记，并保留多 CSV 数据集管理、PSD 显示模式、Gaussian 峰分解、分组频段比较及大文件导入优化。
+当前本地开发版本：**v0.9.0**。本版本移除时频分析链路，修复 specparam 与频带功率协作、结果状态和频段越界标记，并保留多 CSV 数据集管理、PSD 显示模式、Gaussian 峰分解、分组频段比较及大文件导入优化。新增可选的 Project→Subject→Session→Channel 数据管理、AnalysisRun 版本缓存、比较长表和 GUI-free 批处理入口。
 
 ## 目标
 
@@ -60,6 +60,29 @@ plotSpectralModel(modelResult(1), cfg.plot);
 plotAnalysisSummary(artifactResult, psdResult, modelResult, bandResult, cfg.plot);
 files = lfp_export_results(cleanData, "results");
 ```
+
+## 多被试、多 Session 项目模式
+
+项目模式不会替代现有单文件入口，而是在其上增加稳定的身份和结果层：
+
+```matlab
+addpath('src');
+project = lfp_create_project("my_lfp_project", "Human LFP study");
+[project, ~] = lfp_project_add_subject(project, ...
+    struct('subject_id', "P01", 'display_name', "Patient 01"));
+data = lfp_import_scenray_csv("recording.csv");
+[project, ~] = lfp_project_add_session(project, "P01", data, ...
+    struct('session_id', "P01_Baseline", 'visit_label', "Baseline", ...
+           'medication_state', "off", 'stimulation_state', "on"));
+[project, runSummary] = lfp_analyze_project(project, "P01_Baseline");
+spec = struct('type', "within_subject", 'session_ids', "P01_Baseline", ...
+    'bands', "delta", 'metric', "totalPower");
+[project, comparison] = lfp_compare_project(project, spec);
+```
+
+`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_compare_project` 只读取已保存结果并生成可查询长表，不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
+
+当前项目管理 API 已可由脚本调用；现有 GUI 的单次分析工作区保持兼容。Subject/Session 树形管理和比较工作区将在后续增量版本接入，暂不改变现有 GUI 分析入口。
 
 ## MATLAB 原生 GUI
 
