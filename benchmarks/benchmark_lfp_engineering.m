@@ -23,7 +23,7 @@ specifications = struct( ...
     'run', {true, options.RunMedium, options.RunLarge});
 results = struct('name', {}, 'samples', {}, 'channels', {}, 'fileSizeBytes', {}, ...
     'estimatedArrayBytes', {}, 'inspectionSeconds', {}, 'importSeconds', {}, ...
-    'analysisSeconds', {}, 'status', {});
+    'dataVersionSeconds', {}, 'analysisSeconds', {}, 'status', {});
 
 for caseIndex = 1:numel(specifications)
     spec = specifications(caseIndex);
@@ -45,9 +45,10 @@ for caseIndex = 1:numel(specifications)
         error('LFP:BenchmarkImportMismatch', ...
             'Imported [%d %d], expected [%d %d].', size(data.signal,1), size(data.signal,2), nSamples, spec.channels);
     end
+    timer = tic; lfp_data_version(data); dataVersionSeconds = toc(timer);
     analysisSeconds = NaN;
     if options.RunAnalysis
-        cfg = lfpDefaultConfig(); cfg.psd.excludeArtifacts = false; cfg.psd.timeFrequency.enabled = false;
+        cfg = lfpDefaultConfig(); cfg.psd.excludeArtifacts = false;
         artifact = struct('channelMask', false(size(data.signal)));
         timer = tic;
         psd = computeLfpPsd(data, artifact, cfg.psd);
@@ -57,7 +58,7 @@ for caseIndex = 1:numel(specifications)
     results(end+1) = struct('name', spec.name, 'samples', nSamples, 'channels', spec.channels, ...
         'fileSizeBytes', double(fileInfo.bytes), 'estimatedArrayBytes', 8*nSamples*(spec.channels+1), ...
         'inspectionSeconds', inspectionSeconds, 'importSeconds', importSeconds, ...
-        'analysisSeconds', analysisSeconds, 'status', "completed"); %#ok<AGROW>
+        'dataVersionSeconds', dataVersionSeconds, 'analysisSeconds', analysisSeconds, 'status', "completed"); %#ok<AGROW>
     clear cleanupFile;
 end
 disp(struct2table(results));
@@ -66,7 +67,8 @@ end
 function result = empty_result(name, samples, channels, status)
 result = struct('name', name, 'samples', samples, 'channels', channels, ...
     'fileSizeBytes', NaN, 'estimatedArrayBytes', 8*samples*(channels+1), ...
-    'inspectionSeconds', NaN, 'importSeconds', NaN, 'analysisSeconds', NaN, 'status', status);
+    'inspectionSeconds', NaN, 'importSeconds', NaN, 'dataVersionSeconds', NaN, ...
+    'analysisSeconds', NaN, 'status', status);
 end
 
 function write_fixture(filename, nSamples, nChannels)

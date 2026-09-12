@@ -117,7 +117,7 @@ plotProjectComparison(comparison, Band="delta", Metric="totalPower");
 files = lfp_export_comparison(comparison, "comparison_output");
 ```
 
-`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本和计算配置指纹一致时复用有效 `AnalysisRun`，否则生成新的结果版本。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。若旧索引中的引用失效，可明确调用 `lfp_project_repair_channel_caches` 验证或重建所选通道；它只使用项目归档的 Session MAT/CSV 和保存的映射，不修改原始 CSV。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签；通用 CSV 导入对话框可在确认阶段为每个选定信号列填写新的通道名称。`lfp_compare_project` 的最小比较对象是 Session–Channel 条目，允许同一 Session 的多个通道并保留自定义标签；不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
+`lfp_analyze_project` 按 Session 独立执行现有伪影→PSD→specparam→频带功率流程；包含追加文件的 Session 会按启用通道独立计算并在 `results/channels/` 保存隔离结果，单通道失败不会阻止其他通道。数据版本、计算配置指纹和请求模块集合一致时复用有效 `AnalysisRun`，否则生成新的结果版本；追加、分段追加或通道启停会把旧运行标为 `stale_*`，历史文件仍保留但不会冒充当前结果。`lfp_project_get_channel_data` 只读取指定通道缓存；源 CSV 不可用时仍可从项目缓存查看和分析，缓存损坏会显式报错。若旧索引中的引用失效，可明确调用 `lfp_project_repair_channel_caches` 验证或重建所选通道；它只使用项目归档的 Session MAT/CSV 和保存的映射，不修改原始 CSV。`lfp_project_append_data` 拒绝同一源文件+列的重复导入及未明确允许的重复标签；通用 CSV 导入对话框可在确认阶段为每个选定信号列填写新的通道名称。`lfp_compare_project` 的最小比较对象是 Session–Channel 条目，允许同一 Session 的多个通道并保留自定义标签；不跨患者拼接原始数据。批处理可通过 `lfp_run_batch(taskStructOrMatFile)` 调用，任务结构包含 `projectRoot`、可选 `sessionIds`、`analysisConfig`、`comparisonSpec` 和 `outputFolder`。
 
 项目管理 API 与 GUI 使用相同的稳定 ID、数据文件和结果缓存；GUI 不把不同 Session 的原始信号拼接计算。
 
@@ -140,7 +140,7 @@ legacySingleFileApp = launchLfpApp;
 
 主 GUI 的结果页包含全记录原始/伪影显示、PSD、specparam 模型与峰分解、频带功率。计算结果按 `AnalysisRun` 版本保存；切换 Session 或通道只读取相应缓存并重绘，没有结果时显示空状态。比较页保存对象清单、通道映射、指标、频段和实际结果版本；缺失值保持为 NaN，不补零，不自动执行显著性检验。
 
-导入预览只读取有限行；通用数值 CSV 使用 `readmatrix`，SceneRay 多块文件使用一次流式解析。运行时显示阶段和进度，取消请求会在当前原生计算块的下一个检查点生效。配置指纹只包含计算参数；数据版本或计算参数变化时生成新结果版本，图形样式变化不会触发分析。
+导入预览只读取有限行；通用数值 CSV 使用 `readmatrix`，SceneRay 多块文件使用一次流式解析。运行时显示阶段和进度，取消请求会在当前原生计算块的下一个检查点生效。配置指纹只包含计算参数；数据版本或计算参数变化时生成新结果版本，图形样式变化不会触发分析。所有项目写入口共用 `.lfp_write.lock`；锁元数据记录主机、进程、创建时间和基准项目版本，批处理可启用严格版本冲突检查。导入、追加和重命名会留下 `.lfp_staging` 诊断标记，失败时不删除原始 CSV。
 
 旧的 `launchLfpApp` 仍保留多文件单机分析界面和旧会话兼容能力，但新项目应使用 `launch_gui`；两个入口不会共享一份活动 GUI 状态。
 
@@ -169,7 +169,7 @@ end
 
 结果中的 `channelLabels`、`channelNames`、`channelCount` 和 `ipgSN` 会保留到每个文件的结果结构与图标题中。批处理只对每个文件执行一次导入、伪影、PSD、参数化和频段功率计算；绘图和导出是可选步骤。
 
-40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 直接使用 PSD 实际频率网格，旧配置中的 `interpolateLineNoise` 只会被忽略并记录迁移提示。新的 PSD 默认方法为 `multitaper`，分析范围默认 `[1 35]` Hz；兼容配置字段 `cfg.fooof.frequencyRange` 默认 `[1 35]`。超出 PSD 范围的频带返回 NaN，而不是虚假功率。Multitaper 使用真正的 DPSS 多窗估计，`NW` 为主输入，`W=NW/T`、总平滑带宽约为 `2W`，默认 `K=floor(2NW)-1`。
+40 Hz 及其 Nyquist 以下谐波保留在原始时域和 PSD 中；`parameterizePowerSpectrum` 直接使用 PSD 实际频率网格，旧配置中的 `interpolateLineNoise` 只会被忽略并记录迁移提示。新的 PSD 默认方法为 `multitaper`，分析范围默认 `[1 35]` Hz；兼容配置字段 `cfg.fooof.frequencyRange` 默认 `[1 35]`。PSD 会同时记录 requested/effective 频率范围，并保留请求上限相邻的实际 FFT 支持点用于有界频带积分；真正超出有效范围的频带返回 NaN，而不是虚假功率。Multitaper 使用真正的 DPSS 多窗估计，`NW` 为主输入，`W=NW/T`、总平滑带宽约为 `2W`，默认 `K=floor(2NW)-1`；`lfp_project_startup` 和每个 PSD 结果记录实际 DPSS provider，检测到 FieldTrip shadowing 时强制使用项目内实现。
 
 绘图函数支持 `cfg.plot.parent` 指定 Figure、uipanel 或 uitab；所有分析函数仍可在无 GUI 的 MATLAB 脚本中独立调用。`computeLfpPsd` 和 `computeBandPower` 也会返回带有 `processingHistory` 的结果结构，便于未来 GUI 或批处理保存审计轨迹。
 

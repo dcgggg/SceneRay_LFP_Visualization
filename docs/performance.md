@@ -31,10 +31,10 @@ For the medium fixture, total inspect-plus-import time fell from about 4.35 seco
 
 A separate end-to-end benchmark run after the engineering changes used the formal 10-second/4-channel and 10-minute/8-channel fixtures:
 
-| Fixture | CSV size | Inspection | Import | Welch PSD + fixed specparam |
-| --- | ---: | ---: | ---: | ---: |
-| 10 seconds, 4 channels | 0.39 MB | 0.301 s | 1.040 s | 0.132 s |
-| 10 minutes, 8 channels | 43.93 MB | 0.332 s | 0.718 s | 0.093 s |
+| Fixture | CSV size | Inspection | Import | Data-version hash | Multitaper PSD + fixed specparam |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10 seconds, 4 channels | 0.39 MB | 0.297 s | 0.973 s | 0.114 s | 0.355 s |
+| 10 minutes, 8 channels | 43.93 MB | not run in this pass | not run in this pass | not run in this pass | not run in this pass |
 
 This benchmark disables artifact exclusion to isolate CSV loading and the PSD/specparam path. It validates imported dimensions before timing analysis. Times should be treated as machine-specific, and the first small-file import includes MATLAB I/O initialization overhead.
 
@@ -52,4 +52,4 @@ This runs the required 10-second/4-channel and 10-minute/8-channel fixtures. The
 results = benchmark_lfp_engineering(RunLarge=true);
 ```
 
-The benchmark reports import, inspection, uncached PSD/specparam time, file size, and estimated array memory. GUI cache reuse is validated by `tests/test_lfp_runtime_engineering.m`. Responsiveness is validated structurally through progress callbacks, event-queue yields, cancellation tests and lazy rendering; automated headless testing cannot measure subjective interactive latency.
+The benchmark reports import, inspection, data-version hash time, uncached PSD/specparam time, file size, and estimated array memory. GUI cache reuse is validated by `tests/test_lfp_runtime_engineering.m`. Responsiveness is validated structurally through progress callbacks, event-queue yields, cancellation tests and lazy rendering; automated headless testing cannot measure subjective interactive latency.
