@@ -26,6 +26,7 @@ classdef LfpProjectApp < handle
         Busy = false
         CancelRequested = false
         ClosingRequested = false
+        PendingCloseSave = false
         UiInitialized = false
         LayoutBusy = false
         CompactMode = false
@@ -46,7 +47,7 @@ classdef LfpProjectApp < handle
 
         function close(app, force)
             if nargin < 2, force = false; end
-            if app.ClosingRequested, return; end
+            if app.ClosingRequested && ~force, return; end
             fig=app.Figure;
             figureIsValid=isscalar(fig) && isgraphics(fig);
             if ~force && figureIsValid && strcmp(fig.Visible,'on')
@@ -55,17 +56,34 @@ classdef LfpProjectApp < handle
                         'Options',{'请求关闭','取消'},'DefaultOption',2,'CancelOption',2);
                     if strcmp(answer,'取消'), return; end
                     app.CancelRequested=true;
+                    app.PendingCloseSave=app.Dirty;
+                    app.ClosingRequested=true;
+                    app.updateBusyState();
+                    % Do not delete the figure while a synchronous analysis
+                    % can still call progressUpdate/onCleanup. The cleanup
+                    % path finalizes the close after the next safe checkpoint.
+                    fig.Visible='off';
+                    return;
                 end
                 if app.Dirty
                     answer=uiconfirm(app.Figure,'项目有未保存修改。','保存项目', ...
                         'Options',{'保存并关闭','不保存','取消'},'DefaultOption',1,'CancelOption',3);
                     if strcmp(answer,'取消'), return; end
                     if strcmp(answer,'保存并关闭')
-                        try, app.saveProject(); catch e, app.showError(e,'保存失败'); return; end
+                        try
+                            if ~app.saveProject(), return; end
+                        catch e, app.showError(e,'保存失败'); return; end
                     end
                 end
             end
             app.ClosingRequested=true;
+            app.finalizeClose();
+        end
+
+        function finalizeClose(app)
+            app.ClosingRequested=true;
+            fig=app.Figure;
+            figureIsValid=isscalar(fig) && isgraphics(fig);
             if figureIsValid
                 % Detach callbacks before deletion so queued resize events do
                 % not re-enter layout while the window is being destroyed.
@@ -137,6 +155,7 @@ classdef LfpProjectApp < handle
         end
 
         function selectSession(app,sessionId)
+            if app.Busy || app.ClosingRequested, return; end
             [session,subject]=lfp_project_find_session(app.Project,string(sessionId));
             if isempty(session), return; end
             app.CurrentSessionId=string(sessionId); app.CurrentSubjectId=string(subject.subject_id); app.CurrentChannelIndex=1; app.CurrentViewedChannelId=""; app.DisplayChannelIds=strings(0,1); app.DisplaySelectionExplicit=false;
@@ -163,7 +182,8 @@ classdef LfpProjectApp < handle
             [app.Project,summary]=lfp_analyze_project(app.Project,app.CurrentSessionId,Config=cfg, ...
                 ComputeSpecparam=app.Controls.ModuleSpecparam.Value,ComputeBandPower=app.Controls.ModuleBand.Value, ...
                 Save=true,ProgressCallback=@(p,m)app.progressUpdate(p,m));
-            lfp_save_project(app.Project); app.Dirty=false;
+            if app.ClosingRequested, return; end
+            [~, app.Project] = lfp_save_project(app.Project); app.Dirty=false;
             app.loadCurrentSession(); app.refreshProject(); app.refreshAnalysisView();
             status=string(summary(1).status);
             if status=="failed", app.setStatus("失败",summary(1).errorMessage,1);
@@ -185,8 +205,14 @@ classdef LfpProjectApp < handle
             if isempty(app.CompareSelectedSessionIds),error('LFP:NoSessionsSelected','请在候选表中勾选至少一个 Session。');end
             spec=app.readComparisonSpec(); app.Busy=true; app.updateBusyState(); cleanup=onCleanup(@()app.finishTask()); %#ok<NASGU>
             app.setStatus("运行中","正在读取比较结果。",.1); drawnow;
-            [app.Project,comparison]=lfp_compare_project(app.Project,spec,Config=app.currentSessionConfig(), ...
-                ComputeMissing=true,UnifyParameters=logical(unify),Save=true);
+            % A normal comparison only reads compatible current results.  It
+            % never silently applies the currently viewed Session's config to
+            % other Sessions; unified reanalysis is an explicit action.
+            compareCfg = struct();
+            if unify, compareCfg = app.currentSessionConfig(); end
+            [app.Project,comparison]=lfp_compare_project(app.Project,spec,Config=compareCfg, ...
+                ComputeMissing=logical(unify),UnifyParameters=logical(unify),Save=true);
+            if app.ClosingRequested, return; end
             app.CurrentComparison=comparison; app.Dirty=false; app.renderComparison(); app.refreshProject();
             app.setStatus("完成","比较状态："+string(comparison.status),1);
         end
@@ -275,7 +301,7 @@ classdef LfpProjectApp < handle
             app.Controls.DataPreviewPanel=uipanel(pg,'BorderType','none');
             if isprop(app.Controls.DataPreviewPanel,'Scrollable'),app.Controls.DataPreviewPanel.Scrollable='on';end
             app.Controls.DataPreviewGrid=uigridlayout(app.Controls.DataPreviewPanel,[1 1]);app.Controls.DataPreviewGrid.Padding=[2 2 2 2];
-            app.Controls.DataPreviewAxes=gobjects(0);
+            app.Controls.DataPreviewAxes=gobjects(0);app.Controls.DataPreviewAxesPool=gobjects(0);
             % Retained as a compatibility handle for scripts written against older releases.
             app.Controls.DataPreviewChannel=uidropdown(pp,'Items',{'(全部启用通道)'},'Value','(全部启用通道)','Visible','off','Position',[0 0 1 1]);
         end
@@ -378,16 +404,28 @@ classdef LfpProjectApp < handle
             try,app.loadProjectFrom(root);catch e,app.showError(e,'打开项目失败');end
         end
 
-        function saveProject(app)
+        function success = saveProject(app)
+            success = true;
             if app.noProject(),return;end
             if strlength(app.CurrentSessionId)>0 && ~app.Busy
                 try
                     cfg=app.readAnalysisConfig();[app.Project,~]=lfp_project_update_session(app.Project,app.CurrentSessionId,struct('analysis_config',cfg),Save=false);
                 catch exception
                     app.LogMessages(end+1,1)="Session 参数未更新 | Session="+app.CurrentSessionId+" | "+string(exception.identifier)+" | "+string(exception.message);
+                    app.setStatus('保存失败','当前 Session 参数无效，已保留未保存状态：'+string(exception.message),0);
+                    if isgraphics(app.Figure)&&strcmp(app.Figure.Visible,'on'),uialert(app.Figure,string(exception.message),'无法保存');end
+                    success = false;
+                    return;
                 end
             end
-            lfp_save_project(app.Project);app.Dirty=false;app.updateProjectHeader();app.setStatus('就绪','项目已保存。',0);
+            try
+                [~, app.Project] = lfp_save_project(app.Project);
+            catch exception
+                app.LogMessages(end+1,1)="项目保存失败 | "+string(exception.identifier)+" | "+string(exception.message);
+                app.setStatus('保存失败',string(exception.message),0);
+                rethrow(exception);
+            end
+            app.Dirty=false;app.updateProjectHeader();app.setStatus('就绪','项目已保存。',0);
         end
 
         function addSubjectDialog(app)
@@ -539,6 +577,7 @@ classdef LfpProjectApp < handle
         end
 
         function onTreeSelection(app)
+            if app.Busy || app.ClosingRequested, return; end
             node=app.Controls.ProjectTree.SelectedNodes;if isempty(node),return;end;info=node(1).NodeData;if ~isstruct(info)||~isfield(info,'kind'),return;end
             switch string(info.kind)
                 case "project",app.CurrentSubjectId="";app.CurrentSessionId="";app.showProjectDetails();
@@ -567,8 +606,8 @@ classdef LfpProjectApp < handle
         end
 
         function updateSessionContext(app,session,subject)
-            duration=NaN;fs=NaN;samples=0;if ~isempty(session.data_refs),r=session.data_refs(1);duration=r.time_end-r.time_start;fs=r.fs;samples=r.sample_count;end
-            app.Controls.Metadata.Value={char("被试："+subject.subject_id);char("Session："+session.session_id);char("访视："+session.visit_label);char("状态："+session.status);sprintf('采样率：%.6g Hz | 样本：%d | 时长：%.3f s',fs,samples,duration);char("日期："+session.acquisition_date+" | 药物："+session.medication_state+" | 刺激："+session.stimulation_state)};
+            [fsSummary,sampleSummary,durationSummary] = app.sessionSummaries(session);
+            app.Controls.Metadata.Value={char("被试："+subject.subject_id);char("Session："+session.session_id);char("访视："+session.visit_label);char("状态："+session.status);char("规格："+fsSummary);char("样本："+sampleSummary+" | 时长："+durationSummary);char("日期："+session.acquisition_date+" | 药物："+session.medication_state+" | 刺激："+session.stimulation_state)};
             rows=cell(numel(session.channels),13);for k=1:numel(session.channels),c=session.channels(k);source="";if isfield(c,'source_metadata')&&isstruct(c.source_metadata)&&isfield(c.source_metadata,'source_file_name'),source=char(string(c.source_metadata.source_file_name));end;rows(k,:)={logical(get_field_local(c,'enabled',true)),char(c.channel_id),char(c.original_label),char(c.display_label),char(c.side),char(c.region),char(c.contacts),char(c.reference),double(get_field_local(c,'sampling_rate_hz',NaN)),double(get_field_local(c,'sample_count',0)),double(get_field_local(c,'time_end',NaN)-get_field_local(c,'time_start',NaN)),char(c.unit),source};end;app.Controls.ChannelTable.Data=rows;app.Controls.DataContext.Text=char(subject.subject_id+" / "+session.session_id);
             labels=app.channelLabels(session); ids=string({session.channels.channel_id})';
             enabledMask=app.sessionEnabledMask(session); enabledIds=ids(enabledMask); enabledLabels=labels(enabledMask);
@@ -576,10 +615,23 @@ classdef LfpProjectApp < handle
             app.Controls.DataPreviewChannel.Items=cellstr(enabledLabels);app.Controls.DataPreviewChannel.Value=char(enabledLabels(1));
             app.refreshAnalysisChannelItems(session,labels,ids);
             app.refreshDisplayChannelList(session,ids,labels);
-            app.Controls.AnalysisContext.Text=char(subject.subject_id+" / "+session.visit_label+" / "+string(numel(session.channels))+" 通道（启用 "+string(nnz(enabledMask))+"） / "+sprintf('%.3f s',duration));
+            app.Controls.AnalysisContext.Text=char(subject.subject_id+" / "+session.visit_label+" / "+string(numel(session.channels))+" 通道（启用 "+string(nnz(enabledMask))+"） / "+durationSummary);
             app.Controls.AnalysisEnabledCount.Text=char("启用 "+string(nnz(enabledMask))+" 通道");
             if ~app.Busy,app.Controls.RunSession.Enable=local_choice(nnz(enabledMask)>0,'on','off');end
             app.refreshDataPreview();
+        end
+
+        function [fsSummary,sampleSummary,durationSummary]=sessionSummaries(~,session)
+            channels=session.channels;fs=NaN(0,1);samples=NaN(0,1);durations=NaN(0,1);
+            for k=1:numel(channels)
+                fs(end+1,1)=double(get_field_local(channels(k),'sampling_rate_hz',NaN)); %#ok<AGROW>
+                samples(end+1,1)=double(get_field_local(channels(k),'sample_count',NaN)); %#ok<AGROW>
+                durations(end+1,1)=double(get_field_local(channels(k),'time_end',NaN)-get_field_local(channels(k),'time_start',NaN)); %#ok<AGROW>
+            end
+            fs=unique(fs(isfinite(fs)));samples=samples(isfinite(samples));durations=durations(isfinite(durations));
+            if isempty(fs),fsSummary="采样率：未知";elseif numel(fs)==1,fsSummary=string(sprintf('采样率：%.6g Hz',fs));else,fsSummary="采样率："+join(compose('%.6g',fs),'、')+" Hz（异构）";end
+            if isempty(samples),sampleSummary='未知';elseif numel(unique(samples))==1,sampleSummary=string(sprintf('%.0f',samples(1)));else,sampleSummary=string(sprintf('%.0f–%.0f（异构）',min(samples),max(samples)));end
+            if isempty(durations),durationSummary='未知';elseif numel(unique(durations))==1,durationSummary=string(sprintf('%.3f s',durations(1)));else,durationSummary=string(sprintf('%.3f–%.3f s（异构）',min(durations),max(durations)));end
         end
 
         function loadCurrentSession(app)
@@ -610,12 +662,16 @@ classdef LfpProjectApp < handle
             ids=ids(enabledMask); labels=labels(enabledMask);
             if isempty(ids)
                 app.Controls.DataPreviewInfo.Text='暂无启用通道。';
-                ax=uiaxes(app.Controls.DataPreviewGrid); app.Controls.DataPreviewAxes=ax; ax.Layout.Row=1; ax.Layout.Column=1; text(ax,.5,.5,'暂无启用通道','Units','normalized','HorizontalAlignment','center'); axis(ax,'off'); return;
+                pool=app.Controls.DataPreviewAxesPool;if isempty(pool)||~isgraphics(pool(1)),pool(end+1)=uiaxes(app.Controls.DataPreviewGrid);end
+                ax=pool(1);ax.Visible='on'; app.Controls.DataPreviewAxesPool=pool;app.Controls.DataPreviewAxes=ax; ax.Layout.Row=1; ax.Layout.Column=1; text(ax,.5,.5,'暂无启用通道','Units','normalized','HorizontalAlignment','center'); axis(ax,'off'); return;
             end
             n=numel(ids); grid=app.Controls.DataPreviewGrid; grid.RowHeight=repmat({125},1,n); grid.ColumnWidth={'1x'}; grid.RowSpacing=4;
-            axesList=gobjects(n,1); errors=strings(0,1); totalSamples=0; wasDownsampled=false;
+            axesList=app.Controls.DataPreviewAxesPool;
+            if numel(axesList)<n, axesList(end+1:n,1)=gobjects(n-numel(axesList),1); end
+            errors=strings(0,1); totalSamples=0; wasDownsampled=false;
             for k=1:n
-                ax=uiaxes(grid); axesList(k)=ax; ax.Layout.Row=k; ax.Layout.Column=1;
+                if ~isscalar(axesList(k)) || ~isgraphics(axesList(k)), axesList(k)=uiaxes(grid); end
+                ax=axesList(k); ax.Visible='on'; ax.Layout.Row=k; ax.Layout.Column=1; cla(ax,'reset');
                 try
                     channelData=lfp_project_get_channel_data(app.Project,app.CurrentSessionId,ids(k));
                     t=double(channelData.time(:)); y=double(channelData.signal(:)); totalSamples=totalSamples+numel(y);
@@ -631,7 +687,8 @@ classdef LfpProjectApp < handle
                     text(ax,.5,.5,"缓存读取失败："+reason,'Units','normalized','HorizontalAlignment','center','Interpreter','none'); axis(ax,'off');
                 end
             end
-            app.Controls.DataPreviewAxes=axesList;
+            for k=n+1:numel(axesList), if isgraphics(axesList(k)), axesList(k).Visible='off'; end, end
+            app.Controls.DataPreviewAxesPool=axesList;app.Controls.DataPreviewAxes=axesList(1:n);
             suffix="";if wasDownsampled,suffix="；显示采用 min–max 抽稀";end
             message="已显示 "+string(n)+" 个启用通道，共 "+string(totalSamples)+" samples"+suffix+"。";if ~isempty(errors),message=message+" 缓存错误 "+string(numel(errors))+" 个。";end
             app.Controls.DataPreviewInfo.Text=char(message);
@@ -707,12 +764,16 @@ classdef LfpProjectApp < handle
             end
             if isempty(tables), app.setBandEmptyState('暂无可用频带功率结果。'); app.Controls.BandResultTable.Data=cell(0,1); state=struct('status',"empty",'message',"暂无可用频带功率结果。");return;end
             allTbl=tables{1};for k=2:numel(tables),allTbl=[allTbl;tables{k}];end %#ok<AGROW>
-            bandNames=unique(string(allTbl.band),'stable');n=numel(bandNames);layoutGrid=app.Controls.BandPlotGrid;layoutGrid.RowHeight=repmat({180},1,n);layoutGrid.ColumnWidth={'1x'};axesList=gobjects(n,1);colors=lines(max(1,height(allTbl)));
+            bandNames=unique(string(allTbl.band),'stable');n=numel(bandNames);layoutGrid=app.Controls.BandPlotGrid;layoutGrid.RowHeight=repmat({180},1,n);layoutGrid.ColumnWidth={'1x'};axesList=app.Controls.BandAxes;
+            if numel(axesList)<n, axesList(end+1:n,1)=gobjects(n-numel(axesList),1); end
+            colors=lines(max(1,height(allTbl)));
             for b=1:n
-                ax=uiaxes(layoutGrid);axesList(b)=ax;ax.Layout.Row=b;ax.Layout.Column=1;rows=string(allTbl.band)==bandNames(b);vals=double(allTbl.(char(metric))(rows));ch=string(allTbl.channelLabel(rows));ok=isfinite(vals)&logical(allTbl.computable(rows));
+                if ~isscalar(axesList(b)) || ~isgraphics(axesList(b)), axesList(b)=uiaxes(layoutGrid); end
+                ax=axesList(b);ax.Visible='on';cla(ax,'reset');ax.Layout.Row=b;ax.Layout.Column=1;rows=string(allTbl.band)==bandNames(b);vals=double(allTbl.(char(metric))(rows));ch=string(allTbl.channelLabel(rows));ok=isfinite(vals)&logical(allTbl.computable(rows));
                 if any(ok),bar(ax,1:nnz(ok),vals(ok),'FaceColor','flat','CData',colors(1:nnz(ok),:));set(ax,'XTick',1:nnz(ok),'XTickLabel',cellstr(ch(ok)));xtickangle(ax,30);grid(ax,'on');else,text(ax,.5,.5,'该频段没有可计算值','Units','normalized','HorizontalAlignment','center');axis(ax,'off');end
                 title(ax,bandNames(b)+" ["+string(allTbl.lowHz(find(rows,1)))+"–"+string(allTbl.highHz(find(rows,1)))+" Hz]",'Interpreter','none');ylabel(ax,metric,'Interpreter','none');xlabel(ax,'通道');
             end
+            for b=n+1:numel(axesList), if isgraphics(axesList(b)), axesList(b).Visible='off'; end, end
             app.Controls.BandAxes=axesList;app.Controls.BandResultTable.Data=lfp_table_to_uitable_data(allTbl);app.Controls.BandResultTable.ColumnName=allTbl.Properties.VariableNames;
             state=struct('status',"ok",'message',string(numel(bandNames))+" 个频段；每个点/柱代表一个启用通道汇总值。");
         end
@@ -766,13 +827,6 @@ classdef LfpProjectApp < handle
                 if isempty(overlaps),app.Controls.BandHint.Text='可重叠；重叠频段不会自动相加。';
                 else,app.Controls.BandHint.Text=char("提示：存在重叠频段（"+join(overlaps,", ")+"），不会自动相加。");end
             end
-        end
-
-        function bands=readBandsFromTable(app)
-            definitions=app.readBandDefinitionsFromTable();[~,bands]=lfp_get_band_definitions(struct('bandDefinitions',definitions));
-            if isempty(bands),error('LFP:InvalidBands','至少启用一个频段。');end
-            nyquist=app.sessionNyquist();
-            for k=1:numel(bands),if isfinite(nyquist)&&bands(k).rangeHz(2)>nyquist,error('LFP:FrequencyAboveNyquist','频段 %s 上限超过 Nyquist。',bands(k).name);end,end
         end
 
         function c=currentSessionConfig(app)
@@ -837,7 +891,29 @@ classdef LfpProjectApp < handle
         function onRun(app),try,app.runSelectedAnalysis();catch e,app.showError(e,'分析失败');end,end
         function requestCancel(app),app.CancelRequested=true;app.setStatus('正在取消','将在当前计算块结束后停止。',app.Controls.Progress.Value);end
         function progressUpdate(app,p,message),if app.CancelRequested,error('LFP:UserCancelled','用户已取消分析。');end;app.setStatus('运行中',string(message),p);drawnow limitrate;end
-        function finishTask(app),app.Busy=false;app.updateBusyState();end
+        function finishTask(app)
+            app.Busy=false;
+            if ~app.ClosingRequested
+                app.updateBusyState();
+            else
+                fig=app.Figure;
+                if app.PendingCloseSave && app.Dirty && isscalar(fig) && isgraphics(fig)
+                    fig.Visible='on';
+                    answer=uiconfirm(fig,'项目有未保存修改。','保存项目', ...
+                        'Options',{'保存并关闭','不保存','取消'},'DefaultOption',1,'CancelOption',3);
+                    if answer=="取消"
+                        app.ClosingRequested=false; app.PendingCloseSave=false; app.CancelRequested=false; app.updateBusyState(); return;
+                    elseif answer=="保存并关闭"
+                        try
+                            if ~app.saveProject()
+                                app.ClosingRequested=false; app.PendingCloseSave=false; app.CancelRequested=false; app.updateBusyState(); return;
+                            end
+                        catch exception, app.LogMessages(end+1,1)="关闭前保存失败 | "+string(exception.identifier)+" | "+string(exception.message); app.ClosingRequested=false; app.PendingCloseSave=false; app.updateBusyState(); return; end
+                    end
+                end
+                app.finalizeClose();
+            end
+        end
         function updateBusyState(app)
             enabled=local_choice(app.Busy,'off','on');
             runEnabled=enabled;
@@ -848,11 +924,19 @@ classdef LfpProjectApp < handle
                 runEnabled='off';
             end
             app.Controls.RunSession.Enable=runEnabled;app.Controls.CompareButton.Enable=enabled;app.Controls.UnifyCompare.Enable=enabled;app.Controls.NewProject.Enable=enabled;app.Controls.OpenProject.Enable=enabled;app.Controls.Cancel.Enable=local_choice(app.Busy,'on','off');
-            for name=["ChannelTable" "EnableChannels" "DisableChannels" "RemoveChannels" "RebuildChannels" "ImportData" "EditMetadata" "BandTable" "BandAdd" "BandDelete" "BandSelectAll" "BandSelectNone" "ResetBands" "SaveBandTemplate" "AnalysisChannel"]
+            if isfield(app.Controls,'ProjectTree') && isgraphics(app.Controls.ProjectTree), app.Controls.ProjectTree.Enable=enabled; end
+            for name=["ChannelTable" "EnableChannels" "DisableChannels" "RemoveChannels" "RebuildChannels" "ImportData" "EditMetadata" ...
+                    "BandTable" "BandAdd" "BandDelete" "BandSelectAll" "BandSelectNone" "ResetBands" "SaveBandTemplate" ...
+                    "ArtifactZ" "JumpZ" "Padding" "PsdMethod" "PsdWindow" "PsdLow" "PsdHigh" "PsdOverlap" "PsdNW" "PsdK" ...
+                    "SpecMode" "SpecLow" "SpecHigh" "SpecPeaks" "ModuleArtifact" "ModulePsd" "ModuleSpecparam" "ModuleBand" ...
+                    "AnalysisChannel" "CandidateTable" "MappingTable" "FilterSubject" "FilterVisit" "FilterStatus" ...
+                    "CompareChannelLabel" "CompareGroupingBasis" "CompareMetric" "CompareBand" "CompareAggregation" "SelectFiltered" ...
+                    "ClearComparison" "RemoveSelectedComparison" "AddMatchingChannels" "CompareSavePlan" "CompareSaveImage" "CompareExportData"]
                 if isfield(app.Controls,char(name))&&isgraphics(app.Controls.(char(name))),app.Controls.(char(name)).Enable=enabled;end
             end
         end
         function onAnalysisChannelChanged(app)
+            if app.Busy || app.ClosingRequested, return; end
             if strlength(app.CurrentSessionId)>0
                 [session,~]=lfp_project_find_session(app.Project,app.CurrentSessionId); labels=app.channelLabels(session); ids=string({session.channels.channel_id})'; enabled=app.sessionEnabledMask(session); enabledIds=ids(enabled); enabledLabels=labels(enabled);
                 value=string(app.Controls.AnalysisChannel.Value); idx=find(enabledLabels==value,1);
@@ -1004,7 +1088,7 @@ classdef LfpProjectApp < handle
                 plotGroupedPsdComparison(app.CurrentComparison.psd_summary,Parent=ax,Visible="off");app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | 分组 PSD");return;
             elseif mode=="分组频带柱图"
                 if ~isfield(app.CurrentComparison,'result_table')||isempty(app.CurrentComparison.result_table),text(ax,.5,.5,'没有可比较的频带结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
-                plotGroupedBandPower(app.CurrentComparison,Parent=ax,Metric=string(app.Controls.CompareMetric.Value),Visible="off");app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | 分组频带");return;
+                plotGroupedBandPower(app.CurrentComparison,Parent=ax,Metric=string(app.Controls.CompareMetric.Value),Aggregation=string(app.CurrentComparison.aggregation),Visible="off");app.Controls.CompareStatus.Text=char(string(app.CurrentComparison.status)+" | 分组频带");return;
             end
             tbl=app.CurrentComparison.result_table;if isempty(tbl),text(ax,.5,.5,'没有可比较的有效结果','Units','normalized','HorizontalAlignment','center');axis(ax,'off');return;end
             labels=string(tbl.subject_id)+" / "+string(tbl.visit_label)+" / "+string(tbl.channel_label);values=double(tbl.value(:));x=(1:numel(values))';if string(app.Controls.ComparePlot.Value)=="柱状图",bar(ax,x,values,'FaceColor',[.15 .45 .75]);else,scatter(ax,x,values,60,[.1 .4 .8],'filled');end
@@ -1039,7 +1123,7 @@ classdef LfpProjectApp < handle
             if isempty(fieldnames(app.CurrentResults)),app.warn('当前 Session 尚无分析结果。');return;end;[f,p]=uiputfile({'*.mat','MAT 文件'},'保存当前结果',char(app.CurrentSessionId+"_results.mat"));if isequal(f,0),return;end;sessionId=app.CurrentSessionId;run=app.CurrentRun;results=app.CurrentResults;data=app.CurrentData;projectId=app.Project.project_id;save(fullfile(p,f),'projectId','sessionId','run','results','data','-v7.3');
         end
 
-        function onWorkspaceTabChanged(app),if app.Controls.WorkspaceTabs.SelectedTab==app.Controls.CompareTab,app.refreshComparisonCandidates();elseif app.Controls.WorkspaceTabs.SelectedTab==app.Controls.AnalysisTab,app.refreshAnalysisView();end,end
+        function onWorkspaceTabChanged(app),if app.Busy || app.ClosingRequested,return;end;if app.Controls.WorkspaceTabs.SelectedTab==app.Controls.CompareTab,app.refreshComparisonCandidates();elseif app.Controls.WorkspaceTabs.SelectedTab==app.Controls.AnalysisTab,app.refreshAnalysisView();end,end
         function showWorkspace(app,name),if app.noProject(),app.showWelcome();return;end;app.Controls.Welcome.Visible='off';app.Controls.WorkspaceTabs.Visible='on';switch string(name),case 'analysis',app.Controls.WorkspaceTabs.SelectedTab=app.Controls.AnalysisTab;case 'compare',app.Controls.WorkspaceTabs.SelectedTab=app.Controls.CompareTab;otherwise,app.Controls.WorkspaceTabs.SelectedTab=app.Controls.DataTab;end,end
         function toggleNavigation(app)
             if app.CompactMode
@@ -1135,18 +1219,20 @@ classdef LfpProjectApp < handle
         end
         function clearDataPreviewAxes(app)
             if ~isfield(app.Controls,'DataPreviewGrid')||~isgraphics(app.Controls.DataPreviewGrid),return;end
-            children=app.Controls.DataPreviewGrid.Children;for k=1:numel(children),if isgraphics(children(k)),delete(children(k));end,end
-            app.Controls.DataPreviewAxes=gobjects(0);
+            axesList=app.Controls.DataPreviewAxesPool;
+            for k=1:numel(axesList),if isgraphics(axesList(k)),axesList(k).Visible='off';end,end
         end
         function clearBandAxes(app,message)
             if nargin<2,message='暂无频带功率结果。';end
+            axesList=app.Controls.BandAxes;
             if isfield(app.Controls,'BandPlotGrid')&&isgraphics(app.Controls.BandPlotGrid)
-                children=app.Controls.BandPlotGrid.Children;for k=1:numel(children),if isgraphics(children(k)),delete(children(k));end,end
+                for k=1:numel(axesList),if isgraphics(axesList(k)),axesList(k).Visible='off';cla(axesList(k),'reset');end,end
                 app.Controls.BandPlotGrid.RowHeight={1};
             end
-            app.Controls.BandAxes=gobjects(0);
             if isfield(app.Controls,'BandPlotPanel')&&isgraphics(app.Controls.BandPlotPanel)
-                ax=uiaxes(app.Controls.BandPlotGrid);ax.Layout.Row=1;ax.Layout.Column=1;text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');app.Controls.BandAxes=ax;
+                ax=[]; for k=1:numel(axesList),if isgraphics(axesList(k)),ax=axesList(k);break;end,end
+                if isempty(ax),ax=uiaxes(app.Controls.BandPlotGrid);axesList(end+1)=ax;end
+                ax.Visible='on';ax.Layout.Row=1;ax.Layout.Column=1;text(ax,.5,.5,message,'Units','normalized','HorizontalAlignment','center');axis(ax,'off');app.Controls.BandAxes=axesList;
             end
         end
         function setBandEmptyState(app,message),app.clearBandAxes(message);end
@@ -1166,7 +1252,14 @@ classdef LfpProjectApp < handle
         function updateProjectHeader(app),if app.noProject(),return;end;app.Controls.ProjectTitle.Text=char(app.Project.name);app.Controls.ProjectTitle.Tooltip=char(app.Project.rootPath);app.Controls.SaveState.Text=local_choice(app.Dirty,'未保存','已保存');app.Controls.SaveProject.Enable='on';app.Controls.NavigationHint.Text='单击节点查看；比较对象在结果比较页单独勾选。';end
         function markDirty(app),app.Dirty=true;app.updateProjectHeader();end
         function setStatus(app,task,message,progress),task=clean_text(task);message=clean_text(message);app.Controls.TaskStatus.Text=char(task);app.Controls.StageStatus.Text=char(message);app.Controls.StageStatus.Tooltip=char(message);progress=max(0,min(1,double(progress)));app.Controls.Progress.Value=progress;app.Controls.Percent.Text=sprintf('%d%%',round(progress*100));app.LogMessages(end+1,1)="["+string(datestr(now,'HH:MM:SS'))+"] "+task+" | "+message;end
-        function showError(app,e,titleText),app.Busy=false;app.updateBusyState();app.setStatus('失败',string(e.message),0);if isgraphics(app.Figure)&&strcmp(app.Figure.Visible,'on'),uialert(app.Figure,string(e.message),titleText);end,end
+        function showError(app,e,titleText)
+            if app.ClosingRequested
+                app.LogMessages(end+1,1)="任务结束时窗口正在关闭 | "+string(e.identifier)+" | "+string(e.message);
+                return;
+            end
+            app.Busy=false;app.updateBusyState();app.setStatus('失败',string(e.message),0);
+            if isgraphics(app.Figure)&&strcmp(app.Figure.Visible,'on'),uialert(app.Figure,string(e.message),titleText);end
+        end
         function warn(app,message),app.setStatus('提示',string(message),0);if isgraphics(app.Figure)&&strcmp(app.Figure.Visible,'on'),uialert(app.Figure,string(message),'提示','Icon','warning');end,end
         function showLog(app),fig=uifigure('Name','SceneRay LFP 日志','Position',[250 180 850 520]);g=uigridlayout(fig,[1 1]);uitextarea(g,'Editable','off','Value',cellstr(app.LogMessages),'WordWrap','on');end
         function tf=noProject(app),tf=isempty(fieldnames(app.Project));end

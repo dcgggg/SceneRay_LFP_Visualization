@@ -6,7 +6,13 @@ arguments
     sessionId (1,1) string
     updates (1,1) struct
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+[lock,ownLock] = resolve_lock(project, options.LockToken);
+if ownLock
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
+transaction = lfp_project_begin_transaction(string(project.rootPath), "update_session");
 [subjectIndex, sessionIndex] = locate(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 originalProject = project;
@@ -67,7 +73,8 @@ try
         write_session_metadata(fullfile(string(project.rootPath), newFolder), session);
     end
     session = project.subjects(subjectIndex).sessions(sessionIndex);
-    if options.Save, lfp_save_project(project); end
+    if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+    lfp_project_end_transaction(transaction, "committed");
 catch exception
     if moved
         rollback_folder(project, oldFolder, newFolder);
@@ -76,8 +83,9 @@ catch exception
         end
     end
     if options.Save
-        try, lfp_save_project(originalProject); catch, end
+        try, lfp_save_project(originalProject, LockToken=lock); catch, end
     end
+    lfp_project_end_transaction(transaction, "failed", string(exception.message));
     rethrow(exception);
 end
 end
@@ -102,6 +110,11 @@ end
 
 function value = get_field(s, name, fallback)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = fallback; end
+end
+
+function [lock,ownLock] = resolve_lock(project, supplied)
+lock=supplied; ownLock=isempty(fieldnames(lock));
+if ownLock, lock=lfp_project_acquire_lock(string(project.rootPath)); end
 end
 
 function rollback_folder(project, oldFolder, newFolder)

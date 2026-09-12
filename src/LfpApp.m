@@ -519,7 +519,7 @@ classdef LfpApp < handle
             %SAVEPROJECT Persist the current Project index.
             if isempty(fieldnames(app.Project)), error('LFP:NoProject', 'No project is open.'); end
             project = app.Project;
-            lfp_save_project(project);
+            [~, project] = lfp_save_project(project);
         end
 
         function [project, session] = addCurrentDatasetToProject(app, subjectId, sessionInfo)
@@ -2151,14 +2151,6 @@ end
 
 function merged = mergeConfig_local(base, override)
 merged=base; fields=fieldnames(override); for k=1:numel(fields), name=fields{k}; if isstruct(override.(name)) && isfield(base,name) && isstruct(base.(name)), merged.(name)=mergeConfig_local(base.(name),override.(name)); else, merged.(name)=override.(name); end, end
-end
-
-function value = percentile_local(values, percentile)
-values = sort(double(values(:)));
-if isempty(values), value = NaN; return; end
-position = 1 + (numel(values) - 1) * percentile / 100;
-lower = floor(position); upper = ceil(position);
-if lower == upper, value = values(lower); else, value = values(lower) + (position - lower) * (values(upper) - values(lower)); end
 end
 
 function cfg = computational_psd_config(cfg)

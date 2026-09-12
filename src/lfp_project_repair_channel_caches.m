@@ -10,7 +10,9 @@ arguments
     sessionId (1,1) string
     channelIds string = strings(0,1)
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 
 [session, ~, subjectIndex, sessionIndex] = lfp_project_find_session(project, sessionId);
 if isempty(session), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
@@ -92,7 +94,7 @@ if changed
     if isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
         write_session_metadata(fullfile(string(project.rootPath), session.folder_relative_path), session);
     end
-    if options.Save, lfp_save_project(project); end
+    if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
 end
 end
 

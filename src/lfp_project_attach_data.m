@@ -10,9 +10,14 @@ arguments
     options.ChannelMapping struct = struct([])
     options.Replace (1,1) logical = false
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
 
 validate_data(data);
+lock = options.LockToken; ownLock = isempty(fieldnames(lock));
+if ownLock, lock = lfp_project_acquire_lock(string(project.rootPath)); cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
+transaction = lfp_project_begin_transaction(string(project.rootPath), "attach_data");
 [subjectIndex, sessionIndex] = locate_session(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 session = project.subjects(subjectIndex).sessions(sessionIndex);
@@ -54,6 +59,13 @@ for channelIndex = 1:size(data.signal, 2)
 end
 session.channels = channels;
 session.data_version = lfp_data_version(data);
+for runIndex = 1:numel(project.analysisRuns)
+    if string(project.analysisRuns(runIndex).session_id) == sessionId
+        project.analysisRuns(runIndex).status = "stale_data";
+        project.analysisRuns(runIndex).warnings = [string(get_field(project.analysisRuns(runIndex), 'warnings', strings(0,1))); ...
+            "Session data/channels changed after this run."];
+    end
+end
 if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_session" && ...
         isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
     relativeDataPath = fullfile(string(session.folder_relative_path), "data", "session_data.mat");
@@ -97,7 +109,8 @@ if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_
         isfield(session, 'folder_relative_path') && strlength(string(session.folder_relative_path)) > 0
     write_session_metadata(fullfile(string(project.rootPath), session.folder_relative_path), session);
 end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+lfp_project_end_transaction(transaction, "committed");
 end
 
 function validate_data(data)

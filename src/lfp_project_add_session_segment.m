@@ -11,8 +11,11 @@ arguments
     data (1,1) struct
     segmentInfo (1,1) struct = struct()
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 validate_segment(data);
+transaction = lfp_project_begin_transaction(string(project.rootPath), "append_segment");
 [subjectIndex, sessionIndex] = locate_session(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 [existingData, session] = lfp_project_get_session_data(project, sessionId);
@@ -69,8 +72,16 @@ for index = 1:numel(newLabels)
 end
 session.data_refs(end).channel_ids = newIds; session.data_refs(end).cache_relative_paths = newCaches;
 project.subjects(subjectIndex).sessions(sessionIndex) = session;
+for runIndex = 1:numel(project.analysisRuns)
+    if string(project.analysisRuns(runIndex).session_id) == sessionId
+        project.analysisRuns(runIndex).status = "stale_data";
+        project.analysisRuns(runIndex).warnings = [string(get_field(project.analysisRuns(runIndex), 'warnings', strings(0,1))); ...
+            "Session data/channels changed after this run."];
+    end
+end
 lfp_project_write_channel_manifest(project, session);
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+lfp_project_end_transaction(transaction, "committed");
 end
 
 function validate_segment(data)

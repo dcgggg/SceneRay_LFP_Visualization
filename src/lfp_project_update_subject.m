@@ -6,7 +6,13 @@ arguments
     subjectId (1,1) string
     updates (1,1) struct
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+[lock,ownLock] = resolve_lock(project, options.LockToken);
+if ownLock
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
+transaction = lfp_project_begin_transaction(string(project.rootPath), "update_subject");
 index = find(string({project.subjects.subject_id}) == subjectId, 1);
 if isempty(index), error('LFP:SubjectNotFound', 'Subject ID not found: %s', subjectId); end
 originalProject = project;
@@ -57,7 +63,8 @@ try
         project = update_run_paths(project, oldFolder, newFolder);
         write_subject_metadata(fullfile(string(project.rootPath), newFolder), project.subjects(index));
     end
-    if options.Save, lfp_save_project(project); end
+    if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+    lfp_project_end_transaction(transaction, "committed");
 catch exception
     if moved
         rollback_folder(project, oldFolder, newFolder);
@@ -66,8 +73,9 @@ catch exception
         end
     end
     if options.Save
-        try, lfp_save_project(originalProject); catch, end
+        try, lfp_save_project(originalProject, LockToken=lock); catch, end
     end
+    lfp_project_end_transaction(transaction, "failed", string(exception.message));
     rethrow(exception);
 end
 subject = project.subjects(index);
@@ -103,6 +111,11 @@ end
 
 function value = get_field(s, name, fallback)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = fallback; end
+end
+
+function [lock,ownLock] = resolve_lock(project, supplied)
+lock=supplied; ownLock=isempty(fieldnames(lock));
+if ownLock, lock=lfp_project_acquire_lock(string(project.rootPath)); end
 end
 
 function rollback_folder(project, oldFolder, newFolder)

@@ -9,18 +9,24 @@ arguments
     subjectId (1,1) string
     sessionInfo (1,1) struct
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
+end
+lock = options.LockToken;
+if isempty(fieldnames(lock))
+    lock = lfp_project_acquire_lock(string(project.rootPath));
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
 end
 loaded = load(filePath);
 if isfield(loaded, 'data'), data=loaded.data;
 elseif isfield(loaded, 'payload') && isfield(loaded.payload, 'data'), data=loaded.payload.data;
 else, error('LFP:LegacyDataNotFound', 'No data variable found in legacy file.'); end
 sessionInfo.notes = string(get_field(sessionInfo,'notes',"")) + " | migrated from legacy MAT; prior result validity not assumed.";
-[project, session] = lfp_project_add_session(project, subjectId, data, sessionInfo, Save=options.Save);
+[project, session] = lfp_project_add_session(project, subjectId, data, sessionInfo, Save=options.Save, LockToken=lock);
 entry = struct('operation', "legacy_migration", 'sourceFile', filePath, ...
     'subject_id', subjectId, 'session_id', session.session_id, ...
     'notes', "Explicit identity supplied; legacy cached analysis requires revalidation.");
 if ~isfield(project,'migrationLog') || isempty(project.migrationLog), project.migrationLog=entry; else, project.migrationLog(end+1)=entry; end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
 end
 
 function value = get_field(s,name,fallback)

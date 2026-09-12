@@ -6,7 +6,9 @@ arguments
     project (1,1) struct
     sessionId (1,1) string
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 [subjectIndex, sessionIndex] = locate(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 session = project.subjects(subjectIndex).sessions(sessionIndex);
@@ -15,7 +17,7 @@ if isfield(session, 'analysis_run_ids'), runIds = string(session.analysis_run_id
 impact = struct('sessionId', sessionId, 'dataReferencesRetained', string({session.data_refs.relative_path})', ...
     'analysisRunsRetained', runIds, 'sourceFilesUntouched', true);
 project.subjects(subjectIndex).sessions(sessionIndex) = [];
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
 end
 
 function [subjectIndex, sessionIndex] = locate(project, sessionId)

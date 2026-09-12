@@ -9,7 +9,9 @@ arguments
     sessionId (1,1) string
     channelIds string
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 channelIds = unique(string(channelIds(:)), 'stable');
 [si, ki] = locate_session(project, sessionId);
 if isempty(si), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
@@ -53,7 +55,7 @@ report = struct('sessionId', sessionId, 'removedChannelIds', removed, ...
 if ~isempty(project.analysisRuns)
     report.affectedRunIds = string({project.analysisRuns(string({project.analysisRuns.session_id}) == sessionId).run_id})';
 end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
 end
 
 function [si, ki] = locate_session(project, id)

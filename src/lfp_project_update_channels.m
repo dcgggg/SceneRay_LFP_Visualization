@@ -9,7 +9,9 @@ arguments
     sessionId (1,1) string
     channelRows table
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 [subjectIndex, sessionIndex] = locate(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 if ~ismember('channel_id', channelRows.Properties.VariableNames)
@@ -50,7 +52,7 @@ if enabledChanged && isfield(project,'analysisRuns') && ~isempty(project.analysi
     end
 end
 lfp_project_write_channel_manifest(project, project.subjects(subjectIndex).sessions(sessionIndex));
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
 end
 
 function [subjectIndex, sessionIndex] = locate(project, sessionId)

@@ -32,5 +32,5 @@ for field = {'data', 'results', 'comparisons', 'subjects', 'exports', 'logs'}
     folder = fullfile(projectRoot, project.paths.(field{1}));
     if ~isfolder(folder), mkdir(folder); end
 end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project); end
 end

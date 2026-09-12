@@ -12,11 +12,17 @@ arguments
     data (1,1) struct
     sessionInfo (1,1) struct = struct()
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
 
-[project, session] = lfp_project_add_empty_session(project, subjectId, sessionInfo, Save=false);
+lock = options.LockToken;
+if isempty(fieldnames(lock))
+    lock = lfp_project_acquire_lock(string(project.rootPath));
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
+[project, session] = lfp_project_add_empty_session(project, subjectId, sessionInfo, Save=false, LockToken=lock);
 mapping = struct([]);
 if isfield(sessionInfo, 'channel_mapping'), mapping = sessionInfo.channel_mapping; end
 [project, session] = lfp_project_attach_data(project, session.session_id, data, ...
-    ChannelMapping=mapping, Save=options.Save);
+    ChannelMapping=mapping, Save=options.Save, LockToken=lock);
 end

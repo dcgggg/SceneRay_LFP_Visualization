@@ -9,7 +9,9 @@ arguments
     subjectId (1,1) string
     sessionInfo (1,1) struct = struct()
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 
 subjectIndex = find_subject(project, subjectId);
 if isempty(subjectIndex)
@@ -32,6 +34,7 @@ session.notes = get_string(sessionInfo, 'notes', "");
 session.analysis_config = struct();
 session.folder_relative_path = "";
 session.status = "no_data";
+transaction = lfp_project_begin_transaction(string(project.rootPath), "add_empty_session");
 if session_exists(project, session.session_id)
     error('LFP:DuplicateSession', 'Session ID already exists in this project: %s', session.session_id);
 end
@@ -62,7 +65,8 @@ if isfield(project, 'storage_mode') && string(project.storage_mode) == "subject_
     project.subjects(subjectIndex).sessions(end).folder_relative_path = session.folder_relative_path;
     write_session_metadata(sessionFolder, project.subjects(subjectIndex).sessions(end));
 end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+lfp_project_end_transaction(transaction, "committed");
 end
 
 function index = find_subject(project, subjectId)

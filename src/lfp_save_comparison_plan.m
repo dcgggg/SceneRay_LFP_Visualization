@@ -5,7 +5,9 @@ arguments
     project (1,1) struct
     comparisonSpec (1,1) struct
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 [~, ~, ~, ~, ~, plan] = lfp_project_schema();
 plan.comparison_id = lfp_make_id("comparison_plan");
 plan.type = string(get_field(comparisonSpec, 'type', "custom"));
@@ -31,7 +33,7 @@ if options.Save
     if ~isfolder(comparisonFolder), mkdir(comparisonFolder); end
     savedPlan = plan; %#ok<NASGU>
     save(fullfile(comparisonFolder, plan.comparison_id + ".mat"), 'savedPlan', '-v7');
-    lfp_save_project(project);
+    [~, project] = lfp_save_project(project, LockToken=lock);
 end
 end
 

@@ -5,7 +5,9 @@ arguments
     project (1,1) struct
     subjectInfo (1,1) struct
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
+lock=options.LockToken; if isempty(fieldnames(lock)), lock=lfp_project_acquire_lock(string(project.rootPath)); cleanupLock=onCleanup(@()lfp_project_release_lock(lock)); end %#ok<NASGU>
 [~, template, ~, ~, ~, ~] = lfp_project_schema();
 subject = template;
 subject.subject_id = get_string(subjectInfo, 'subject_id', lfp_make_id("subject"));
@@ -14,6 +16,7 @@ subject.group = get_string(subjectInfo, 'group', "");
 subject.notes = get_string(subjectInfo, 'notes', "");
 subject.folder_relative_path = "";
 subject.sessions = template.sessions;
+transaction = lfp_project_begin_transaction(string(project.rootPath), "add_subject");
 if ~isempty(project.subjects) && any(string({project.subjects.subject_id}) == subject.subject_id)
     error('LFP:DuplicateSubject', 'Subject ID already exists: %s', subject.subject_id);
 end
@@ -30,7 +33,8 @@ if use_nested_layout(project)
     project.subjects(end).folder_relative_path = subject.folder_relative_path;
     write_subject_metadata(folder, project.subjects(end));
 end
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+lfp_project_end_transaction(transaction, "committed");
 end
 
 function tf = use_nested_layout(project)

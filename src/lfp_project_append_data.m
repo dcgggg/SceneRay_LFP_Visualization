@@ -15,8 +15,13 @@ arguments
     options.AllowDuplicateLabel (1,1) logical = false
     options.ReplaceDuplicateSource (1,1) logical = false
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
 validate_data(data);
+lock = options.LockToken; ownLock = isempty(fieldnames(lock));
+if ownLock, lock = lfp_project_acquire_lock(string(project.rootPath)); cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
+transaction = lfp_project_begin_transaction(string(project.rootPath), "append_data");
 [subjectIndex, sessionIndex] = locate_session(project, sessionId);
 if isempty(subjectIndex), error('LFP:SessionNotFound', 'Session ID not found: %s', sessionId); end
 session = project.subjects(subjectIndex).sessions(sessionIndex);
@@ -84,6 +89,16 @@ end
 session.channels = [existing newChannels];
 session.data_version = combine_versions(session.data_version, string({newChannels.data_revision}));
 session.status = "imported";
+% Any previous run describes the pre-append channel/data snapshot. Keep it as
+% historical evidence but make it ineligible for current-result reuse.
+for runIndex = 1:numel(project.analysisRuns)
+    if string(project.analysisRuns(runIndex).session_id) == sessionId
+        project.analysisRuns(runIndex).status = "stale_data";
+        warningText = "Session data/channels changed after this run.";
+        oldWarnings = get_field(project.analysisRuns(runIndex), 'warnings', strings(0,1));
+        project.analysisRuns(runIndex).warnings = [string(oldWarnings(:)); warningText];
+    end
+end
 ref = data_ref_template();
 ref.relative_path = cachePaths(1); ref.source_path = sourcePath;
 ref.project_copy_relative_path = copy_source_file(project, session, sourcePath);
@@ -102,7 +117,8 @@ end
 report = struct('sessionId', sessionId, 'sourceFileId', sourceId, 'sourceFingerprint', fingerprint, ...
     'addedChannelIds', newIds, 'addedChannelLabels', labels, 'cacheRelativePaths', cachePaths, ...
     'reusedExisting', false, 'warnings', strings(0,1));
-if options.Save, lfp_save_project(project); end
+if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
+lfp_project_end_transaction(transaction, "committed");
 end
 
 function channel = channel_template()

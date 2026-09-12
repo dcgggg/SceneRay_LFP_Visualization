@@ -28,10 +28,12 @@ end
 if ~mkdir(projectRoot)
     error('LFP:ProjectCreateFailed', '无法创建项目目录：%s。', projectRoot);
 end
+lock = lfp_project_acquire_lock(string(projectRoot));
+cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
 try
-    project = lfp_create_project(projectRoot, name, Description=options.Description, Config=options.Config);
+    project = lfp_create_project(projectRoot, name, Description=options.Description, Config=options.Config, Save=false);
     project.storage_mode = "subject_session";
-    lfp_save_project(project);
+    [~, project] = lfp_save_project(project, LockToken=lock);
 catch exception
     if isfolder(projectRoot) && ~isfile(fullfile(projectRoot, "project.mat")), rmdir(projectRoot, 's'); end
     rethrow(exception);
