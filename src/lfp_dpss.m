@@ -18,7 +18,8 @@ if taperCount > defaultCount * 2
     warning('LFP:LargeDPSSCount', 'Taper count exceeds the usual floor(2*NW)-1 recommendation.');
 end
 
-if exist('dpss', 'file') == 2 && nargin('dpss') >= 3
+provider = lfp_dpss_provider();
+if provider.useToolbox && nargin('dpss') >= 3
     [tapers, eigenvalues] = dpss(nSamples, nw, taperCount);
     tapers = double(tapers);
     eigenvalues = double(eigenvalues(:));

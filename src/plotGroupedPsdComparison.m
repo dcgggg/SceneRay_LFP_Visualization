@@ -1,5 +1,5 @@
 function handles = plotGroupedPsdComparison(summary, options)
-%PLOTGROUPEDPSDCOMPARISON Plot Session curves and subject-weighted groups.
+%PLOTGROUPEDPSDCOMPARISON Plot curves using the recorded aggregation rule.
 
 arguments
     summary (1,1) struct
@@ -42,7 +42,12 @@ for groupIndex = 1:numel(groups)
     end
 end
 grid(ax,'on'); xlabel(ax,'频率 (Hz)'); ylabel(ax,'PSD (dB, 10log10(linear PSD))');
-title(ax,'分组 PSD 比较 | 个体曲线 + 被试等权组均值','Interpreter','none');
+aggregation = "subject"; if isfield(summary,'aggregation'), aggregation=lower(string(summary.aggregation)); end
+if aggregation == "session"
+    title(ax,'分组 PSD 比较 | 个体曲线 + Session 等权组均值','Interpreter','none');
+else
+    title(ax,'分组 PSD 比较 | 个体曲线 + 被试等权组均值','Interpreter','none');
+end
 legend(ax,'Location','best','Interpreter','none');
 if isfield(summary,'aggregation'), ax.UserData=struct('aggregation',summary.aggregation,'errorMode',options.ErrorMode); end
 handles=struct('figure',fig,'axes',ax);

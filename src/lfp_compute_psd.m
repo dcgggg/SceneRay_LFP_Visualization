@@ -62,9 +62,9 @@ end
 window = hann_vector(windowSamples);
 normalization = fs * sum(window .^ 2);
 fullFrequencyHz = (0:floor(nfft / 2))' * fs / nfft;
-frequencyMask = fullFrequencyHz >= options.FrequencyRangeHz(1) & ...
-    fullFrequencyHz <= min(options.FrequencyRangeHz(2), fs/2);
+[frequencyMask, effectiveUpper] = select_frequency_support(fullFrequencyHz, options.FrequencyRangeHz, fs);
 frequencyHz = fullFrequencyHz(frequencyMask);
+if isempty(frequencyHz), error('LFP:FrequencyRangeUnavailable', 'Requested PSD range does not overlap the Nyquist-limited FFT grid.'); end
 psd = NaN(numel(frequencyHz), nChannels);
 acceptedWindows = cell(1, nChannels);
 windowStarts = 1:stepSamples:max(1, nSamples - windowSamples + 1);
@@ -152,6 +152,8 @@ end
 spectrum = struct();
 spectrum.frequencyHz = frequencyHz;
 spectrum.psd = psd;
+spectrum.requestedFrequencyRangeHz = options.FrequencyRangeHz;
+spectrum.effectiveFrequencyRangeHz = [frequencyHz(1), effectiveUpper];
 spectrum.psdUnits = string(data.units) + "^2/Hz";
 spectrum.fs = fs;
 spectrum.units = string(data.units);
@@ -171,6 +173,13 @@ spectrum.frequencyResolutionHz = fs / nfft;
 spectrum.excludedWindowCount = numel(windowStarts) - spectrum.windowCount;
 spectrum.filledSampleCount = filledSampleCount;
 spectrum.timeGapRejected = timeGapRejected;
+spectrum.validChannelMask = spectrum.windowCount > 0 & sum(isfinite(psd), 1) > 0;
+spectrum.status = ternary_text(all(spectrum.validChannelMask), "ok", ...
+    ternary_text(any(spectrum.validChannelMask), "partial", "no_valid_windows"));
+spectrum.quality = struct('validChannelMask', spectrum.validChannelMask, ...
+    'finiteFrequencyCount', sum(isfinite(psd), 1), 'windowCount', spectrum.windowCount, ...
+    'reason', ternary_text(spectrum.status == "no_valid_windows", ...
+    "No continuous valid windows remained after artifact/time checks.", ""));
 spectrum.includesLineNoise = true;
 spectrum.parameters = struct('windowSeconds', options.WindowSeconds, ...
     'windowSamples', windowSamples, 'overlapFraction', options.OverlapFraction, ...
@@ -178,7 +187,7 @@ spectrum.parameters = struct('windowSeconds', options.WindowSeconds, ...
     'detrendConstant', options.DetrendConstant, 'excludeArtifacts', options.ExcludeArtifacts, ...
     'aggregationMethod', options.AggregationMethod, 'taper', options.Taper, ...
     'method', "welch", 'detrend', resolve_detrend_mode(options.DetrendMode, options.DetrendConstant), ...
-    'frequencyRangeHz', options.FrequencyRangeHz);
+    'frequencyRangeHz', options.FrequencyRangeHz, 'effectiveFrequencyRangeHz', spectrum.effectiveFrequencyRangeHz);
 data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
     'notes', "Manual Welch PSD from raw signal; artifact-heavy windows excluded; 40-Hz harmonics retained.");
@@ -242,4 +251,19 @@ end
 
 function callback = callback_or_default(candidate, defaultCallback)
 if isa(candidate, 'function_handle'), callback = candidate; else, callback = defaultCallback; end
+end
+
+function [mask, effectiveUpper] = select_frequency_support(fullFrequencyHz, requested, fs)
+low = requested(1); upper = min(requested(2), fs / 2);
+mask = fullFrequencyHz >= low & fullFrequencyHz <= upper;
+indices = find(mask);
+if isempty(indices), effectiveUpper = NaN; return; end
+if indices(end) < numel(fullFrequencyHz) && fullFrequencyHz(indices(end)) < upper
+    mask(indices(end)+1) = true;
+end
+effectiveUpper = fullFrequencyHz(find(mask, 1, 'last'));
+end
+
+function value = ternary_text(condition, first, second)
+if condition, value = first; else, value = second; end
 end

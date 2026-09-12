@@ -1,13 +1,14 @@
 function handles = plotGroupedBandPower(comparison, options)
-%PLOTGROUPEDBANDPOWER Plot group means with subject-level points.
-%   Subject values are averaged within subject before group means/SD are
-%   calculated, so repeated Sessions do not receive extra between-subject
-%   weight. Missing values remain missing and are never replaced by zero.
+%PLOTGROUPEDBANDPOWER Plot group means with explicit Session/Subject points.
+%   Subject aggregation averages repeated Sessions within subject first;
+%   Session aggregation gives each Session representative equal weight.
+%   Missing values remain missing and are never replaced by zero.
 
 arguments
     comparison (1,1) struct
     options.Parent = []
     options.Metric (1,1) string = "totalPower"
+    options.Aggregation (1,1) string = "subject"
     options.Visible (1,1) string = "on"
 end
 if ~isfield(comparison,'result_table') || ~istable(comparison.result_table)
@@ -31,8 +32,15 @@ values=NaN(numel(groups),numel(bands));sd=values;subjectPoints=cell(numel(groups
 for g=1:numel(groups)
     for b=1:numel(bands)
         rows=string(tbl.group_label)==groups(g)&string(tbl.band)==bands(b);
-        sub=unique(string(tbl.subject_id(rows)),'stable'); reps=NaN(numel(sub),1);
-        for s=1:numel(sub), reps(s)=mean(double(tbl.value(rows&string(tbl.subject_id)==sub(s))),'omitnan'); end
+        sub=unique(string(tbl.subject_id(rows)),'stable');
+        if lower(options.Aggregation)=="session"
+            reps=NaN(nnz(rows),1);sessionIds=unique(string(tbl.session_id(rows)),'stable');
+            for s=1:numel(sessionIds), reps(s)=mean(double(tbl.value(rows&string(tbl.session_id)==sessionIds(s))),'omitnan'); end
+            reps=reps(1:numel(sessionIds));
+        else
+            reps=NaN(numel(sub),1);
+            for s=1:numel(sub), reps(s)=mean(double(tbl.value(rows&string(tbl.subject_id)==sub(s))),'omitnan'); end
+        end
         reps=reps(isfinite(reps));subjectPoints{g,b}=reps;
         if ~isempty(reps),values(g,b)=mean(reps,'omitnan');if numel(reps)>1,sd(g,b)=std(reps,0,'omitnan');end,end
     end
@@ -47,8 +55,16 @@ for b=1:numel(bands)
     end
 end
 grid(ax,'on');xticks(ax,1:numel(bands));xticklabels(ax,cellstr(bands));xlabel(ax,'频段');ylabel(ax,char(options.Metric));
-title(ax,'分组频带功率 | 条形=被试等权均值，点=被试代表值，误差=SD','Interpreter','none');
+title(ax, ternary_title(options.Aggregation), 'Interpreter','none');
 if numel(bars) == numel(groups), legend(ax,bars,cellstr(groups),'Location','best','Interpreter','none');
 else, legend(ax,cellstr(groups),'Location','best','Interpreter','none'); end
 handles=struct('figure',fig,'axes',ax,'values',values,'sd',sd,'groups',groups,'bands',bands);
+end
+
+function value = ternary_title(aggregation)
+if lower(aggregation)=="session"
+    value='分组频带功率 | 条形=Session等权均值，点=Session代表值，误差=SD';
+else
+    value='分组频带功率 | 条形=被试等权均值，点=被试代表值，误差=SD';
+end
 end

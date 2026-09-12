@@ -15,13 +15,24 @@ arguments
     options.ComputeBandPower (1,1) logical = true
     options.Save (1,1) logical = true
     options.ProgressCallback = []
+    options.LockToken (1,1) struct = struct()
 end
 
 if isempty(sessionIds), sessionIds = all_session_ids(project); end
 sessionIds = string(sessionIds(:));
 cfg = project.defaultConfig;
 if ~isempty(fieldnames(options.Config)), cfg = options.Config; end
-configId = lfp_config_fingerprint(cfg);
+requestedModules = struct('specparam', logical(options.ComputeSpecparam), ...
+    'band_power', logical(options.ComputeBandPower));
+configId = lfp_analysis_config_fingerprint(cfg, requestedModules);
+% Result payloads are written even when Save=false (that option controls the
+% project index only), therefore the whole analysis transaction must hold the
+% same project lock.  Batch/compare callers can pass their existing token.
+lock = options.LockToken;
+if isempty(fieldnames(lock))
+    lock = lfp_project_acquire_lock(string(project.rootPath));
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
 summary = empty_summary(sessionIds);
 for index = 1:numel(sessionIds)
     if ~isempty(options.ProgressCallback), options.ProgressCallback((index-1)/max(numel(sessionIds),1), "Session " + sessionIds(index)); end
@@ -35,24 +46,25 @@ for index = 1:numel(sessionIds)
         if should_analyze_channels(session)
             [project, independentRun, ~, independentSummary] = lfp_analyze_independent_channels(project, session.session_id, cfg, ...
                 ComputeSpecparam=options.ComputeSpecparam, ComputeBandPower=options.ComputeBandPower, Save=options.Save, ...
-                Force=options.Force, ProgressCallback=options.ProgressCallback);
+                Force=options.Force, ProgressCallback=options.ProgressCallback, LockToken=lock);
             summary(index) = independentSummary;
             continue;
         end
-        existing = find_reusable_run(project, session, configId, options.Force);
+        existing = find_reusable_run(project, session, cfg, requestedModules, options.Force);
         if ~isempty(existing)
             summary(index).status = "reused"; summary(index).runId = existing.run_id; summary(index).configId = configId;
             continue;
         end
         [data, ~] = lfp_project_get_session_data(project, session.session_id);
         data = standardize_analysis_data(data);
-        run = make_run(session, data, cfg, configId);
+        run = make_run(session, data, cfg, configId, requestedModules);
         [artifactResult, cleanData] = run_artifact(data, cfg.artifact);
         run.module_status.artifact = "ok";
         psdResult = computeLfpPsd(cleanData, artifactResult, cfg.psd);
-        run.module_status.psd = "ok";
+        validPsd = get_field_local(psdResult, 'validChannelMask', true(1,size(data.signal,2)));
+        if all(validPsd), run.module_status.psd = "ok"; else, run.module_status.psd = "failed"; end
         modelResult = struct([]);
-        if options.ComputeSpecparam
+        if options.ComputeSpecparam && all(validPsd)
             try
                 modelResult = parameterizePowerSpectrum(psdResult.frequencyHz, psdResult.psd, cfg.fooof);
                 run.module_status.specparam = summarize_model_status(modelResult);
@@ -60,11 +72,14 @@ for index = 1:numel(sessionIds)
                 run.module_status.specparam = "failed";
                 run.warnings(end + 1) = "specparam: " + string(exception.message); %#ok<AGROW>
             end
+        elseif options.ComputeSpecparam
+            run.module_status.specparam = "not_run_psd_invalid";
+            run.warnings(end + 1) = "specparam skipped because one or more channels has no valid PSD windows."; %#ok<AGROW>
         else
             run.module_status.specparam = "not_requested";
         end
         bandResult = struct();
-        if options.ComputeBandPower
+        if options.ComputeBandPower && all(validPsd)
             try
                 bandResult = computeBandPower(psdResult, modelResult, cfg.bands);
                 run.module_status.band_power = "ok";
@@ -72,6 +87,9 @@ for index = 1:numel(sessionIds)
                 run.module_status.band_power = "failed";
                 run.warnings(end + 1) = "band power: " + string(exception.message); %#ok<AGROW>
             end
+        elseif options.ComputeBandPower
+            run.module_status.band_power = "not_run_psd_invalid";
+            run.warnings(end + 1) = "band power skipped because one or more channels has no valid PSD windows."; %#ok<AGROW>
         else
             run.module_status.band_power = "not_requested";
         end
@@ -101,7 +119,7 @@ for index = 1:numel(sessionIds)
         project.subjects(subjectIndex).sessions(localSessionIndex).status = "analyzed";
         summary(index).status = run.status; summary(index).runId = run.run_id; summary(index).configId = configId;
         summary(index).warnings = run.warnings;
-        if options.Save, lfp_save_project(project); end
+        if options.Save, [~, project] = lfp_save_project(project, LockToken=lock); end
     catch exception
         summary(index).status = "failed"; summary(index).errorMessage = string(exception.message);
         summary(index).errorIdentifier = string(exception.identifier);
@@ -110,18 +128,20 @@ end
 if ~isempty(options.ProgressCallback), options.ProgressCallback(1, "Project analysis complete"); end
 end
 
-function run = make_run(session, data, cfg, configId)
+function run = make_run(session, data, cfg, configId, requestedModules)
 [~, ~, ~, ~, template, ~] = lfp_project_schema();
 run = template;
 run.run_id = lfp_make_id("run"); run.session_id = session.session_id;
 run.input_data_version = session.data_version;
 run.channel_ids = string({session.channels.channel_id})';
+run.channel_revisions = string({session.channels.data_revision})';
 run.channel_labels = string({session.channels.original_label})';
 run.analysis_time_range = [double(data.time(1)), double(data.time(end))];
 run.config = cfg; run.config_id = configId; run.software_version = "SceneRay-LFP v" + string(cfg.version);
 run.created_at = string(datestr(now, 31));
 run.module_status = struct('artifact', "pending", 'psd', "pending", ...
     'specparam', "pending", 'band_power', "pending");
+run.requested_modules = requestedModules;
 run.status = "running"; run.warnings = strings(0, 1);
 end
 
@@ -149,17 +169,16 @@ function count = get_band_rows(band)
 if isstruct(band) && isfield(band, 'table'), count = height(band.table); else, count = 0; end
 end
 
-function run = find_reusable_run(project, session, configId, force)
+function run = find_reusable_run(project, session, cfg, requestedModules, force)
 run = [];
 if force || ~isfield(project, 'analysisRuns') || isempty(project.analysisRuns), return; end
 for index = numel(project.analysisRuns):-1:1
     candidate = project.analysisRuns(index);
-    if string(candidate.session_id) ~= string(session.session_id) || ...
-            string(candidate.input_data_version) ~= string(session.data_version) || ...
-            string(candidate.config_id) ~= string(configId) || string(candidate.status) == "failed"
+    if string(candidate.session_id) ~= string(session.session_id)
         continue;
     end
-    if isfield(candidate, 'result_ref') && isfile(fullfile(string(project.rootPath), candidate.result_ref))
+    identity = lfp_result_identity(project, session, candidate, Config=cfg, RequiredModules=requestedModules);
+    if identity.isCurrent && string(candidate.status) ~= "failed"
         run = candidate; return;
     end
 end
@@ -186,6 +205,10 @@ end
 
 function value = get_field(s, name, fallback)
 if isfield(s, name) && ~isempty(s.(name)), value=s.(name); else, value=fallback; end
+end
+
+function value = get_field_local(s, name, fallback)
+if isstruct(s) && isfield(s,name) && ~isempty(s.(name)), value=s.(name); else, value=fallback; end
 end
 
 function delete_if_present(filename)

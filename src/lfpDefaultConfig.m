@@ -4,7 +4,7 @@ function cfg = lfpDefaultConfig()
 %   calling the analysis functions. No function reads user input dialogs.
 
 cfg = struct();
-cfg.version = "0.9.0";
+cfg.version = "0.10.0-dev";
 cfg.artifact = struct();
 cfg.artifact.method = "native";
 cfg.artifact.nativeFallback = true;
@@ -119,7 +119,7 @@ metadata(end+1) = item("artifact.amplitudeZ", cfg.artifact.amplitudeZ, "double",
 metadata(end+1) = item("artifact.derivativeZ", cfg.artifact.derivativeZ, "double", "z", [0 Inf], [], ...
     "Robust first-difference threshold for jumps and spikes.", "Artifact");
 metadata(end+1) = item("psd.windowLengthSec", cfg.psd.windowLengthSec, "double", "s", [eps Inf], [], ...
-    "Welch/STFT window length.", "PSD");
+    "Welch/multitaper window length.", "PSD");
 metadata(end+1) = item("psd.overlapFraction", cfg.psd.overlapFraction, "double", "fraction", [0 1], [], ...
     "Fractional overlap between adjacent windows.", "PSD");
 metadata(end+1) = item("psd.frequencyRange", cfg.psd.frequencyRange, "double", "Hz", [0 Inf], [], ...

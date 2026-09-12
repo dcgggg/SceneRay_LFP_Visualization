@@ -14,9 +14,18 @@ arguments
     options.ComputeMissing (1,1) logical = false
     options.UnifyParameters (1,1) logical = false
     options.Save (1,1) logical = true
+    options.LockToken (1,1) struct = struct()
 end
 
 [~, ~, ~, ~, ~, template] = lfp_project_schema();
+% Comparisons can write both result payloads (when ComputeMissing=true) and
+% the comparison index.  Acquire the common lock before either operation;
+% callers that already own it pass the token through.
+lock = options.LockToken;
+if (options.Save || options.ComputeMissing) && isempty(fieldnames(lock))
+    lock = lfp_project_acquire_lock(string(project.rootPath));
+    cleanupLock = onCleanup(@()lfp_project_release_lock(lock)); %#ok<NASGU>
+end
 comparison = template;
 comparison.comparison_id = lfp_make_id("comparison");
 comparison.type = lower(string(get_field(comparisonSpec, 'type', "custom")));
@@ -31,20 +40,29 @@ comparison.channel_entries = comparison.channel_mapping;
 comparison.grouping_basis = string(get_field(comparisonSpec, 'grouping_basis', "custom"));
 comparison.group_defs = get_field(comparisonSpec, 'group_defs', struct([]));
 comparison.created_at = string(datestr(now, 31));
-cfg = project.defaultConfig; if ~isempty(fieldnames(options.Config)), cfg = options.Config; end
-targetConfigId = lfp_config_fingerprint(cfg); comparison.target_config_id = targetConfigId;
+% PSD-only comparisons should not require a band-power product.  Metrics
+% emitted by the long band table require band_power; the grouped PSD plot can
+% therefore use a run that contains only a valid PSD.  This keeps comparison
+% dependencies aligned with the requested output instead of forcing an
+% unrelated downstream module.
+requiredModules = struct('specparam', false, ...
+    'band_power', ~is_psd_comparison_metric(comparison.metric));
+hasTargetConfig = ~isempty(fieldnames(options.Config));
+cfg = project.defaultConfig; if hasTargetConfig, cfg = options.Config; end
+targetConfigId = ""; if hasTargetConfig, targetConfigId = lfp_analysis_config_fingerprint(cfg, requiredModules); end
+comparison.target_config_id = targetConfigId;
 
 runIds = strings(numel(comparison.session_ids),1); missing = strings(0,1);
 for index = 1:numel(comparison.session_ids)
     sessionId = comparison.session_ids(index); session = find_session(project, sessionId);
     if isempty(session), comparison.warnings(end+1,1) = "Session not found: " + sessionId; continue; end %#ok<AGROW>
-    run = find_latest_run(project, session, targetConfigId);
+    run = find_latest_run(project, session, targetConfigId, requiredModules);
     if isempty(run), missing(end+1,1) = sessionId; else, runIds(index) = run.run_id; end %#ok<AGROW>
 end
 if ~isempty(missing) && options.ComputeMissing
-    [project, ~] = lfp_analyze_project(project, missing, Config=cfg, Force=options.UnifyParameters, Save=options.Save);
+    [project, ~] = lfp_analyze_project(project, missing, Config=cfg, Force=options.UnifyParameters, Save=options.Save, LockToken=lock);
     for index = 1:numel(missing)
-        session = find_session(project, missing(index)); run = find_latest_run(project, session, targetConfigId);
+        session = find_session(project, missing(index)); run = find_latest_run(project, session, targetConfigId, requiredModules);
         if ~isempty(run), runIds(comparison.session_ids == missing(index)) = run.run_id; end
     end
 end
@@ -100,10 +118,15 @@ comparison.subject_count = numel(comparison.subject_ids);
 if isempty(comparison.group_defs)
     comparison.group_defs = infer_group_defs(project, comparison.session_ids, comparison.channel_mapping, comparison.grouping_basis);
 end
-comparison.psd_summary = lfp_build_psd_comparison(project, runIds, comparison.channel_mapping, comparison.group_defs);
+comparison.psd_summary = lfp_build_psd_comparison(project, runIds, comparison.channel_mapping, comparison.group_defs, ...
+    Aggregation=comparison.aggregation);
+if isfield(comparison.psd_summary,'status') && ~ismember(string(comparison.psd_summary.status), ["ok" "empty"])
+    if comparison.status == "ok", comparison.status = "partial"; end
+    comparison.warnings(end+1,1) = "PSD comparison status: " + string(comparison.psd_summary.status) + ".";
+end
+if ~isfield(project, 'comparisons') || isempty(project.comparisons), project.comparisons = template([]); end
+project.comparisons(end+1) = comparison;
 if options.Save
-    if ~isfield(project, 'comparisons') || isempty(project.comparisons), project.comparisons = template([]); end
-    project.comparisons(end+1) = comparison;
     comparisonFolder = "comparisons";
     if isfield(project,'paths') && isfield(project.paths,'comparisons') && strlength(string(project.paths.comparisons))>0
         comparisonFolder=string(project.paths.comparisons);
@@ -112,7 +135,7 @@ if options.Save
     if ~isfolder(fileparts(target)), mkdir(fileparts(target)); end
     savedComparison = comparison; %#ok<NASGU>
     save(target, 'savedComparison', '-v7');
-    lfp_save_project(project);
+    [~, project] = lfp_save_project(project, LockToken=lock);
 end
 end
 
@@ -122,11 +145,16 @@ if isempty(selectedBands), selectedBands = string(tableData.band); end
 for index = 1:height(tableData)
     band = string(tableData.band(index)); if ~any(selectedBands == band), continue; end
     if ~ismember(metric, string(tableData.Properties.VariableNames)), continue; end
-    channelIndex = tableData.channelIndex(index); channelId = ""; label = string(tableData.channelLabel(index));
-    if channelIndex <= numel(session.channels),
-        if isfield(session.channels(channelIndex),'enabled') && ~session.channels(channelIndex).enabled, continue; end
-        channelId = string(session.channels(channelIndex).channel_id);
-    end
+    channelIndex = double(tableData.channelIndex(index)); channelId = ""; label = string(tableData.channelLabel(index));
+    runIds = string(get_field(run,'channel_ids',strings(0,1))); runLabels = string(get_field(run,'channel_labels',strings(0,1)));
+    if channelIndex < 1 || channelIndex > numel(runIds), continue; end
+    channelId = runIds(channelIndex);
+    currentIndex = find(string({session.channels.channel_id}) == channelId, 1);
+    if isempty(currentIndex), continue; end
+    if isfield(session.channels(currentIndex),'enabled') && ~session.channels(currentIndex).enabled, continue; end
+    if channelIndex <= numel(runLabels) && strlength(runLabels(channelIndex)) > 0, label = runLabels(channelIndex); end
+    displayLabel = string(session.channels(currentIndex).display_label);
+    if strlength(displayLabel) > 0, label = displayLabel; end
     [include, targetLabel, groupLabel] = mapped_channel(channelMapping, session.session_id, channelId, label);
     if ~include, continue; end
     if strlength(groupLabel) == 0, groupLabel = default_group_label(session, groupingBasis); end
@@ -174,6 +202,14 @@ if ~isempty(session.channels) && isfield(session.channels(1), 'unit') && strleng
     base = string(session.channels(1).unit);
     if unit == "uV^2", unit = base + "^2"; elseif unit == "log10(uV^2)", unit = "log10(" + base + "^2)"; end
 end
+end
+
+function tf = is_psd_comparison_metric(metric)
+%IS_PSD_COMPARISON_METRIC Return true for comparison metrics backed by PSD.
+% The GUI currently uses the plot selector for grouped PSD rather than a
+% metric string, but accepting explicit PSD names keeps the API extensible.
+name = lower(strtrim(string(metric)));
+tf = ismember(name, ["psd" "power_spectral_density" "psd_power"]);
 end
 
 function rows = empty_long_table()
@@ -261,12 +297,14 @@ for s=1:numel(project.subjects)
 end
 end
 
-function run = find_latest_run(project, session, configId)
+function run = find_latest_run(project, session, configId, requiredModules)
 run=[]; if isempty(session) || isempty(project.analysisRuns), return; end
 for k=numel(project.analysisRuns):-1:1
     candidate=project.analysisRuns(k);
-    if string(candidate.session_id)==string(session.session_id) && string(candidate.config_id)==string(configId) && ...
-            isfile(fullfile(string(project.rootPath), string(candidate.result_ref))) && string(candidate.status) ~= "failed"
+    if string(candidate.session_id) ~= string(session.session_id), continue; end
+    configArg = struct(); if strlength(string(configId)) > 0 && isfield(candidate,'config'), configArg = candidate.config; end
+    identity = lfp_result_identity(project, session, candidate, Config=configArg, RequiredModules=requiredModules);
+    if identity.isCurrent && string(candidate.status) ~= "failed"
         run=candidate; return;
     end
 end

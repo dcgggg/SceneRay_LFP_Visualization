@@ -18,6 +18,13 @@ try
     [result.cleanData, result.artifactResult] = detectAndHandleArtifacts(data, cfg.artifact);
     result.moduleStatus.artifact = "ok";
     result.psdResult = computeLfpPsd(result.cleanData, result.artifactResult, cfg.psd);
+    validPsd = get_field_local(result.psdResult, 'validChannelMask', true);
+    if ~all(validPsd)
+        result.moduleStatus.psd = "failed";
+        result.status = "failed";
+        result.warnings(end+1,1) = "PSD: no valid continuous windows remained after artifact/time checks.";
+        return;
+    end
     result.moduleStatus.psd = "ok";
 catch exception
     result.status = "failed"; result.moduleStatus.artifact = get_status(result.moduleStatus, 'artifact', "failed");
@@ -51,6 +58,10 @@ end
 
 function value = get_status(s, name, fallback)
 if isfield(s, name), value = s.(name); else, value = fallback; end
+end
+
+function value = get_field_local(s, name, fallback)
+if isstruct(s) && isfield(s,name) && ~isempty(s.(name)), value=s.(name); else, value=fallback; end
 end
 
 function data = standardize_data(data)

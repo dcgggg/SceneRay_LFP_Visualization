@@ -1,4 +1,4 @@
-function summary = lfp_build_psd_comparison(project, runIds, channelMapping, groupDefs)
+function summary = lfp_build_psd_comparison(project, runIds, channelMapping, groupDefs, options)
 %LFP_BUILD_PSD_COMPARISON Collect compatible Session PSDs for comparison.
 %   PSDs are kept linear in the returned matrix.  Group means use equal
 %   subject weighting: Session PSDs are averaged within each subject before
@@ -10,17 +10,25 @@ arguments
     runIds string
     channelMapping struct = struct([])
     groupDefs struct = struct([])
+    options.Aggregation (1,1) string = "subject"
 end
 
 runIds = string(runIds(:));
+aggregation = lower(string(options.Aggregation));
+if aggregation == "session"
+    errorDefinition = "SD across Session-level representative PSDs";
+else
+    errorDefinition = "SD across subject-level representative PSDs";
+end
 summary = struct('status', "ok", 'message', "", 'frequencyHz', zeros(0,1), ...
     'psd', zeros(0,0), 'session_ids', strings(0,1), 'subject_ids', strings(0,1), ...
     'channel_labels', strings(0,1), 'group_labels', strings(0,1), ...
     'method', strings(0,1), 'psd_units', strings(0,1), 'parameter_signature', "", ...
-    'aggregation', "linear_psd_then_log_if_displayed", ...
+    'aggregation', options.Aggregation, ...
     'group_labels_unique', strings(0,1), 'group_mean_psd', zeros(0,0), ...
     'group_sd_psd', zeros(0,0), 'group_subject_count', zeros(0,1), ...
-    'group_subject_ids', {{}}, 'errorDefinition', "SD across subject-level representative PSDs");
+    'group_subject_ids', {{}}, 'group_session_count', zeros(0,1), ...
+    'errorDefinition', errorDefinition);
 
 for k = 1:numel(runIds)
     if strlength(runIds(k)) == 0, continue; end
@@ -52,6 +60,12 @@ for k = 1:numel(runIds)
             if size(p,1) ~= numel(f) && size(p,2) == numel(f), p = p.'; end
             if size(p,1) ~= numel(f), summary.status = "incompatible_dimensions"; summary.message = "PSD维度与频率轴不一致。"; continue; end
             if channelIndex > size(p,2), continue; end
+            candidatePsd = p(:,channelIndex);
+            if nnz(isfinite(candidatePsd)) < 2
+                summary.status = ternary_status(summary.status, "partial");
+                summary.message = "部分 PSD 没有足够有限频点，已从比较样本排除。";
+                continue;
+            end
             signature = psd_signature(psdResult);
             units = string(get_field(psdResult, 'psdUnits', "unknown"));
             if isempty(summary.frequencyHz)
@@ -70,7 +84,7 @@ for k = 1:numel(runIds)
             if strlength(group) == 0, group = string(subject.group); end
             if strlength(group) == 0, group = string(session.visit_label); end
             if strlength(group) == 0, group = "未分组"; end
-            summary.psd(:,end+1) = p(:,channelIndex); %#ok<AGROW>
+            summary.psd(:,end+1) = candidatePsd; %#ok<AGROW>
             summary.session_ids(end+1,1) = string(session.session_id); %#ok<AGROW>
             summary.subject_ids(end+1,1) = string(subject.subject_id); %#ok<AGROW>
             summary.channel_labels(end+1,1) = label; %#ok<AGROW>
@@ -89,17 +103,26 @@ summary.group_labels_unique = unique(summary.group_labels, 'stable');
 summary.group_mean_psd = NaN(numel(summary.frequencyHz), numel(summary.group_labels_unique));
 summary.group_sd_psd = NaN(size(summary.group_mean_psd));
 summary.group_subject_count = zeros(numel(summary.group_labels_unique),1);
+summary.group_session_count = zeros(numel(summary.group_labels_unique),1);
 summary.group_subject_ids = cell(numel(summary.group_labels_unique),1);
 for groupIndex = 1:numel(summary.group_labels_unique)
     group = summary.group_labels_unique(groupIndex);
-    subjects = unique(summary.subject_ids(summary.group_labels == group), 'stable');
-    representatives = NaN(numel(summary.frequencyHz), numel(subjects));
-    for subjectIndex = 1:numel(subjects)
-        columns = summary.group_labels == group & summary.subject_ids == subjects(subjectIndex);
-        representatives(:,subjectIndex) = mean(summary.psd(:,columns), 2, 'omitnan');
+    groupColumns = find(summary.group_labels == group);
+    subjects = unique(summary.subject_ids(groupColumns), 'stable');
+    summary.group_session_count(groupIndex) = numel(groupColumns);
+    if aggregation == "session"
+        representatives = summary.psd(:,groupColumns);
+    else
+        representatives = NaN(numel(summary.frequencyHz), numel(subjects));
+        for subjectIndex = 1:numel(subjects)
+            columns = summary.group_labels == group & summary.subject_ids == subjects(subjectIndex);
+            representatives(:,subjectIndex) = mean(summary.psd(:,columns), 2, 'omitnan');
+        end
     end
     summary.group_mean_psd(:,groupIndex) = mean(representatives, 2, 'omitnan');
-    if numel(subjects) > 1, summary.group_sd_psd(:,groupIndex) = std(representatives, 0, 2, 'omitnan'); end
+    if size(representatives, 2) > 1
+        summary.group_sd_psd(:,groupIndex) = std(representatives, 0, 2, 'omitnan');
+    end
     summary.group_subject_count(groupIndex) = numel(subjects);
     summary.group_subject_ids{groupIndex} = subjects;
 end
@@ -123,8 +146,14 @@ if isempty(index) && isfield(entry, 'channel_label')
     index = find(string(run.channel_labels) == string(entry.channel_label), 1);
 end
 if isempty(index), index = []; return; end
-if index <= numel(session.channels), label = string(session.channels(index).display_label); if strlength(label)==0, label=string(session.channels(index).original_label); end
-elseif index <= numel(run.channel_labels), label = string(run.channel_labels(index)); end
+runId = ""; if isfield(run,'channel_ids') && index <= numel(run.channel_ids), runId = string(run.channel_ids(index)); end
+sessionIndex = find(string({session.channels.channel_id}) == runId, 1);
+if ~isempty(sessionIndex)
+    label = string(session.channels(sessionIndex).display_label);
+    if strlength(label)==0, label=string(session.channels(sessionIndex).original_label); end
+elseif index <= numel(run.channel_labels)
+    label = string(run.channel_labels(index));
+end
 end
 
 function entries = mapping_entries(mapping, sessionId)
@@ -139,6 +168,14 @@ end
 
 function value = get_field(s, name, fallback)
 if isfield(s, name) && ~isempty(s.(name)), value = s.(name); else, value = fallback; end
+end
+
+function out = ternary_status(current, fallback)
+if current == "failed" || current == "incompatible_frequency_grid" || current == "incompatible_parameters"
+    out = current;
+else
+    out = fallback;
+end
 end
 
 function signature = psd_signature(psdResult)

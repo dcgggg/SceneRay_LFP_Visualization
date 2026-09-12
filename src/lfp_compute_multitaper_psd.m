@@ -40,10 +40,11 @@ if options.Nfft == 0, nfft = 2 ^ nextpow2(windowSamples); else, nfft = max(windo
 nw = options.TimeBandwidthProduct;
 if options.TaperCount == 0, taperCount = max(1, floor(2 * nw) - 1); else, taperCount = options.TaperCount; end
 [tapers, eigenvalues] = lfp_dpss(windowSamples, nw, taperCount);
+provider = lfp_dpss_provider();
 fullFrequencyHz = (0:floor(nfft / 2))' * fs / nfft;
-frequencyMask = fullFrequencyHz >= options.FrequencyRangeHz(1) & ...
-    fullFrequencyHz <= min(options.FrequencyRangeHz(2), fs / 2);
+[frequencyMask, effectiveUpper] = select_frequency_support(fullFrequencyHz, options.FrequencyRangeHz, fs);
 frequencyHz = fullFrequencyHz(frequencyMask);
+if isempty(frequencyHz), error('LFP:FrequencyRangeUnavailable', 'Requested PSD range does not overlap the Nyquist-limited FFT grid.'); end
 windowStarts = make_window_starts(nSamples, windowSamples, options.OverlapFraction);
 windowPsd = NaN(numel(frequencyHz), numel(windowStarts), nChannels);
 acceptedWindows = cell(1, nChannels);
@@ -110,6 +111,8 @@ end
 
 spectrum = struct();
 spectrum.frequencyHz = frequencyHz; spectrum.psd = psd;
+spectrum.requestedFrequencyRangeHz = options.FrequencyRangeHz;
+spectrum.effectiveFrequencyRangeHz = [frequencyHz(1), effectiveUpper];
 spectrum.psdUnits = string(data.units) + "^2/Hz"; spectrum.fs = fs;
 spectrum.units = string(data.units); spectrum.channelLabels = get_channel_labels(data, nChannels);
 spectrum.channelNames = spectrum.channelLabels; spectrum.channelCount = nChannels;
@@ -121,7 +124,16 @@ spectrum.windowPsd = windowPsd; spectrum.validWindowCountPerFrequency = sum(isfi
 spectrum.frequencyResolutionHz = fs / nfft; spectrum.excludedWindowCount = numel(windowStarts) - spectrum.windowCount;
 spectrum.filledSampleCount = filledSampleCount; spectrum.includesLineNoise = true;
 spectrum.timeGapRejected = timeGapRejected;
+spectrum.validChannelMask = cellfun(@(x) ~isempty(x), acceptedWindows);
+spectrum.status = ternary_text(all(spectrum.validChannelMask), "ok", ...
+    ternary_text(any(spectrum.validChannelMask), "partial", "no_valid_windows"));
+spectrum.quality = struct('validChannelMask', spectrum.validChannelMask, ...
+    'finiteFrequencyCount', sum(isfinite(psd), 1), ...
+    'windowCount', spectrum.windowCount, ...
+    'reason', ternary_text(spectrum.status == "no_valid_windows", ...
+    "No continuous valid windows remained after artifact/time checks.", ""));
 spectrum.taperCount = taperCount; spectrum.dpssEigenvalues = eigenvalues(:)';
+spectrum.dpssProvider = provider.name; spectrum.dpssResolution = provider.resolution;
 spectrum.timeBandwidthProduct = nw; spectrum.halfBandwidthHz = nw / (windowSamples / fs);
 spectrum.smoothingBandwidthHz = 2 * spectrum.halfBandwidthHz;
 spectrum.parameters = struct('method', "multitaper", 'windowSeconds', options.WindowSeconds, ...
@@ -129,8 +141,9 @@ spectrum.parameters = struct('method', "multitaper", 'windowSeconds', options.Wi
     'maxArtifactFraction', options.MaxArtifactFraction, 'excludeArtifacts', options.ExcludeArtifacts, ...
     'aggregationMethod', options.AggregationMethod, 'detrend', options.DetrendMode, ...
     'timeBandwidthProduct', nw, 'taperCount', taperCount, 'taperWeighting', options.TaperWeighting, ...
+    'dpssProvider', provider.name, 'dpssResolution', provider.resolution, ...
     'halfBandwidthHz', spectrum.halfBandwidthHz, 'smoothingBandwidthHz', spectrum.smoothingBandwidthHz, ...
-    'frequencyRangeHz', options.FrequencyRangeHz);
+    'frequencyRangeHz', options.FrequencyRangeHz, 'effectiveFrequencyRangeHz', spectrum.effectiveFrequencyRangeHz);
 data.spectrum = spectrum;
 entry = struct('operation', "psd", 'parameters', spectrum.parameters, ...
     'notes', "Artifact-aware DPSS multitaper PSD; equal taper weights; 40-Hz harmonics retained.");
@@ -176,4 +189,22 @@ end
 
 function callback = callback_or_default(candidate, defaultCallback)
 if isa(candidate, 'function_handle'), callback = candidate; else, callback = defaultCallback; end
+end
+
+function [mask, effectiveUpper] = select_frequency_support(fullFrequencyHz, requested, fs)
+% Keep one adjacent FFT bin when the requested edge falls between bins.  It
+% is a support point for bounded band-edge interpolation, not an extrapolated
+% estimate and not an extension beyond Nyquist.
+low = requested(1); upper = min(requested(2), fs / 2);
+mask = fullFrequencyHz >= low & fullFrequencyHz <= upper;
+indices = find(mask);
+if isempty(indices), effectiveUpper = NaN; return; end
+if indices(end) < numel(fullFrequencyHz) && fullFrequencyHz(indices(end)) < upper
+    mask(indices(end)+1) = true;
+end
+effectiveUpper = fullFrequencyHz(find(mask, 1, 'last'));
+end
+
+function value = ternary_text(condition, first, second)
+if condition, value = first; else, value = second; end
 end

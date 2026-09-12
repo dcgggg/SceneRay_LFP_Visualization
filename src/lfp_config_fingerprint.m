@@ -34,13 +34,18 @@ if isstruct(value)
     end
     names = fieldnames(value);
     if ~includePlot
-        names = setdiff(names, {'plot', 'parameterMetadata'}, 'stable');
+        names = setdiff(names, {'plot', 'parameterMetadata', 'export', 'version'}, 'stable');
     end
     names = sort(names);
     result = struct();
     for index = 1:numel(names)
         name = names{index};
         nested = value.(name);
+        % Disabled definitions are presentation/configuration state, not a
+        % computation input. The enabled subset is represented in `bands`.
+        if strcmp(name, 'bandDefinitions') && isstruct(nested) && ~isempty(nested) && isfield(nested, 'enabled')
+            nested = nested([nested.enabled]);
+        end
         if isa(nested, 'function_handle') || isobject(nested)
             continue;
         end

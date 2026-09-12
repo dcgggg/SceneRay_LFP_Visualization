@@ -29,5 +29,15 @@ info.sourceOnPath = contains(string(path), string(srcRoot), 'IgnoreCase', ispc);
 info.signalProcessingToolbox = license('test', 'Signal_Toolbox') == 1;
 info.statisticsToolbox = license('test', 'Statistics_Toolbox') == 1;
 info.fieldTripEntryPoint = ~isempty(which('ft_defaults'));
+provider = lfp_dpss_provider();
+info.dpssProvider = provider.name;
+info.dpssResolution = provider.resolution;
+info.dpssAllResolutions = string(which('dpss','-all'));
+info.dpssSelectionReason = provider.reason;
+info.fieldTripPathWarning = "";
+if info.fieldTripEntryPoint && ~isempty(info.dpssAllResolutions) && ...
+        contains(lower(info.dpssAllResolutions(1)), 'fieldtrip')
+    info.fieldTripPathWarning = "FieldTrip is on the MATLAB path; native DPSS remains selected, but global path shadowing may affect optional FieldTrip calls.";
+end
 info.status = 'initialized_only';
 end
